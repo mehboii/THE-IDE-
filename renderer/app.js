@@ -888,6 +888,10 @@ class AppController {
   setupMenubar() {
     const menus = {
       file: [
+        { label: 'Open Folder…', accel: 'Ctrl+O', run: () => this.fileExplorer && this.fileExplorer.handleOpenFolderClick() },
+        { label: 'Save', accel: 'Ctrl+S', disabled: !this.isEditorTabSaveable(), run: () => this.codeEditorManager && this.codeEditorManager.saveActiveFile() },
+        { label: 'Save As…', accel: 'Ctrl+Shift+S', disabled: !this.isEditorTabActive(), run: () => this.codeEditorManager && this.codeEditorManager.saveAsActiveFile() },
+        { sep: true },
         { label: 'New Pane', accel: 'Ctrl+Shift+N', run: () => this.createPane({}) },
         { label: 'Save Workspace…', run: () => this.saveCurrentWorkspace() },
         { label: 'Delete Workspace', run: () => this.deleteSelectedWorkspace() },
@@ -1104,6 +1108,30 @@ class AppController {
         this.killAllSessions();
         return;
       }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+        if (this.isEditorTabActive()) {
+          e.preventDefault();
+          this.codeEditorManager.saveAsActiveFile();
+          return;
+        }
+      }
+
+      // Ctrl+O — Open Folder
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault();
+        if (this.fileExplorer) this.fileExplorer.handleOpenFolderClick();
+        return;
+      }
+
+      // Ctrl+S — Save Active File
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 's' || e.key === 'S')) {
+        if (this.isEditorTabSaveable()) {
+          e.preventDefault();
+          this.codeEditorManager.saveActiveFile();
+          return;
+        }
+      }
+
       // Ctrl+B — toggle sidebar (not when shift held)
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
         // Skip if focus is inside an xterm terminal — Ctrl+B is the tmux prefix key.
@@ -1134,6 +1162,9 @@ class AppController {
           : activity === 'terminal' ? 'TERMINALS' : 'EXPLORER';
       }
       if (activity === 'terminal') {
+        if (this.viewMode === 'editor') {
+          this.setViewMode('terminals');
+        }
         const pane = this.panes.get(this.focusedPaneId) || this.panes.values().next().value;
         if (pane) this.focusPane(pane.id);
       }
@@ -1194,6 +1225,16 @@ class AppController {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  isEditorTabActive() {
+    return Boolean(this.codeEditorManager && this.codeEditorManager.activeFilePath);
+  }
+
+  isEditorTabSaveable() {
+    if (!this.codeEditorManager || !this.codeEditorManager.activeFilePath) return false;
+    const tabData = this.codeEditorManager.openTabs.get(this.codeEditorManager.activeFilePath);
+    return Boolean(tabData && tabData.mode === 'edit');
   }
 
   getPanesListForCodeEditor() {

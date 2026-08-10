@@ -89,6 +89,28 @@ class CodeEditorManager {
     }
   }
 
+  getOrCreateModel(filePath, content, language) {
+    if (!this.monacoReady || !window.monaco) return null;
+    try {
+      const uri = monaco.Uri.file(filePath);
+      let model = monaco.editor.getModel(uri);
+      if (model) {
+        if (content !== undefined && content !== null) {
+          model.setValue(content);
+        }
+        if (language) {
+          monaco.editor.setModelLanguage(model, language);
+        }
+      } else {
+        model = monaco.editor.createModel(content || '', language || 'plaintext', uri);
+      }
+      return model;
+    } catch (err) {
+      console.error(`Monaco model creation error for ${filePath}:`, err);
+      return null;
+    }
+  }
+
   async openFile(filePath, mode = 'view', linkedPaneId = null) {
     if (this.openTabs.has(filePath)) {
       this.switchTab(filePath);
@@ -107,10 +129,7 @@ class CodeEditorManager {
     }
 
     const language = this.detectLanguage(filePath);
-    let model = null;
-    if (this.monacoReady && window.monaco) {
-      model = monaco.editor.createModel(res.content, language, monaco.Uri.file(filePath));
-    }
+    const model = this.getOrCreateModel(filePath, res.content, language);
 
     const tabData = {
       filePath,
@@ -136,7 +155,7 @@ class CodeEditorManager {
 
     if (this.editor && this.monacoReady) {
       if (!tabData.model && window.monaco) {
-        tabData.model = monaco.editor.createModel(tabData.content, tabData.language, monaco.Uri.file(filePath));
+        tabData.model = this.getOrCreateModel(filePath, tabData.content, tabData.language);
       }
       if (tabData.model) {
         this.editor.setModel(tabData.model);
@@ -149,7 +168,7 @@ class CodeEditorManager {
     const tabData = this.openTabs.get(filePath);
     if (tabData) {
       if (tabData.model) {
-        tabData.model.dispose();
+        try { tabData.model.dispose(); } catch (_) {}
       }
       if (window.electronAPI && window.electronAPI.unwatchFile) {
         window.electronAPI.unwatchFile(filePath);
@@ -201,6 +220,27 @@ class CodeEditorManager {
       this.showSaveSuccessIndicator(this.activeFilePath);
     } else {
       alert(`Failed to save file: ${res.error}`);
+    }
+  }
+
+  async saveAsActiveFile() {
+    if (!this.activeFilePath) return;
+    const tabData = this.openTabs.get(this.activeFilePath);
+    if (!tabData) return;
+
+    const currentContent = tabData.model ? tabData.model.getValue() : tabData.content;
+    const newPath = await window.electronAPI.showSaveDialog(this.activeFilePath);
+    if (!newPath) return;
+
+    const res = await window.electronAPI.writeFile(newPath, currentContent);
+    if (res.success) {
+      const oldPath = this.activeFilePath;
+      const linkedPaneId = tabData.linkedPaneId;
+      this.closeTab(oldPath);
+      await this.openFile(newPath, 'edit', linkedPaneId);
+      this.showSaveSuccessIndicator(newPath);
+    } else {
+      alert(`Failed to Save As: ${res.error}`);
     }
   }
 

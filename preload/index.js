@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // System Dialogs
   selectDirectory: (defaultPath) => ipcRenderer.invoke('dialog:select-directory', defaultPath),
+  showSaveDialog: (defaultPath) => ipcRenderer.invoke('dialog:show-save-dialog', defaultPath),
+  setTestSaveAsPath: (targetPath) => ipcRenderer.invoke('test:set-save-as-path', targetPath),
 
   // Filesystem & Watcher Methods
   readDir: (dirPath) => ipcRenderer.invoke('fs:read-dir', dirPath),

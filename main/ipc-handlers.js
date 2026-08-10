@@ -88,6 +88,29 @@ function registerIpcHandlers() {
     return null;
   });
 
+  ipcMain.handle('test:set-save-as-path', (event, targetPath) => {
+    global.__TEST_SAVE_AS_PATH__ = targetPath;
+    return true;
+  });
+
+  ipcMain.handle('dialog:show-save-dialog', async (event, defaultPath) => {
+    if (process.env.IDE_TEST_MODE === '1' && global.__TEST_SAVE_AS_PATH__) {
+      const p = global.__TEST_SAVE_AS_PATH__;
+      global.__TEST_SAVE_AS_PATH__ = null;
+      return p;
+    }
+    const window = event.sender.getOwnerBrowserWindow();
+    const result = await dialog.showSaveDialog(window, {
+      title: 'Save File As',
+      defaultPath: defaultPath || undefined
+    });
+
+    if (!result.canceled && result.filePath) {
+      return result.filePath;
+    }
+    return null;
+  });
+
   // Filesystem IPC handlers
   const fs = require('fs');
   const path = require('path');
