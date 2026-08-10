@@ -1,0 +1,1158 @@
+class AppController {
+  constructor() {
+    this.gridManager = null;
+    this.panes = new Map();
+    this.agentsList = [];
+    this.workspaces = {};
+    this.activeWorkspaceName = null;
+    this.focusedPaneId = null;
+    this.paneIdCounter = 1;
+    this._pendingCreates = 0; // anti-spam: counts in-flight pane creates
+    this.sidebarCollapsed = false;
+    this.sidebarWidth = 260;
+    this.commandPaletteIndex = 0;
+    this.commandPaletteFiltered = [];
+
+    // DOM refs
+    this.gridContainer = document.getElementById('grid-container');
+    this.workspaceSelect = document.getElementById('workspace-select');
+    this.btnSaveWorkspace = document.getElementById('btn-save-workspace');
+    this.btnDeleteWorkspace = document.getElementById('btn-delete-workspace');
+    this.btnPreset2x3 = document.getElementById('btn-preset-2x3');
+    this.btnPreset3x2 = document.getElementById('btn-preset-3x2');
+    this.btnAddPane = document.getElementById('btn-add-pane');
+    this.btnToggleBroadcast = document.getElementById('btn-toggle-broadcast');
+    this.btnKillAll = document.getElementById('btn-kill-all');
+    this.btnHelp = document.getElementById('btn-help');
+    this.btnTabAdd = document.getElementById('btn-tab-add');
+    this.btnTabClose = document.getElementById('btn-tab-close');
+    this.tmuxStatusBadge = document.getElementById('tmux-status-badge');
+    this.notificationBanner = document.getElementById('notification-banner');
+    this.bannerMessage = document.getElementById('banner-message');
+    this.bannerClose = document.getElementById('banner-close');
+    this.panesCountEl = document.getElementById('active-panes-count');
+    this.sidebarPaneCountEl = document.getElementById('sidebar-pane-count');
+    this.focusedPaneInfo = document.getElementById('focused-pane-info');
+    this.statusWorkspace = document.getElementById('status-workspace');
+    this.statusBar = document.getElementById('status-bar');
+    this.sideBar = document.getElementById('side-bar');
+    this.sideBarBody = document.getElementById('side-bar-body');
+    this.sidebarSessionsList = document.getElementById('sidebar-sessions-list');
+    this.sidebarWorkspacesList = document.getElementById('sidebar-workspaces-list');
+    this.sidebarAgentsList = document.getElementById('sidebar-agents-list');
+    this.editorTabsScroll = document.getElementById('editor-tabs-scroll');
+    this.titlebarTitle = document.getElementById('titlebar-title');
+    this.appShell = document.getElementById('app-shell');
+
+    this.modalOrphans = document.getElementById('modal-orphans');
+    this.orphansList = document.getElementById('orphans-list');
+    this.btnOrphansReattachAll = document.getElementById('btn-orphans-reattach-all');
+    this.btnOrphansKillAll = document.getElementById('btn-orphans-kill-all');
+    this.modalOrphansClose = document.getElementById('modal-orphans-close');
+    this.modalHelp = document.getElementById('modal-help');
+    this.modalHelpClose = document.getElementById('modal-help-close');
+    this.modalHelpOk = document.getElementById('modal-help-ok');
+
+    this.modalRunAgent = document.getElementById('modal-run-agent');
+    this.modalRunAgentClose = document.getElementById('modal-run-agent-close');
+    this.runAgentSelect = document.getElementById('run-agent-select');
+    this.runAgentDesc = document.getElementById('run-agent-desc');
+    this.btnRunAgentCancel = document.getElementById('btn-run-agent-cancel');
+    this.btnRunAgentSingle = document.getElementById('btn-run-agent-single');
+    this.btnRunAgentAll = document.getElementById('btn-run-agent-all');
+    this._runAgentTargetPaneId = null;
+
+    this.commandPalette = document.getElementById('command-palette');
+    this.commandPaletteInput = document.getElementById('command-palette-input');
+    this.commandPaletteList = document.getElementById('command-palette-list');
+    this.menubarDropdown = document.getElementById('menubar-dropdown');
+  }
+
+  async init() {
+    this.gridManager = new GridManager(this.gridContainer);
+    window.broadcastManager.init(this.btnToggleBroadcast);
+    window.broadcastManager.onToggle(() => this.updateFooter());
+
+    this.setupIpcListeners();
+    await this.checkTmux();
+
+    this.agentsList = await window.electronAPI.getAgents();
+    await this.loadWorkspaceOptions();
+    this.renderSidebarAgents();
+
+    this.attachEventListeners();
+    this.setupKeyboardShortcuts();
+    this.setupSidebarResize();
+    this.setupCommandPalette();
+    this.setupMenubar();
+
+    const orphans = await window.electronAPI.listOrphans();
+    if (orphans && orphans.length > 0 && !window.__IDE_TEST_MODE__) {
+      this.showOrphanModal(orphans);
+    } else {
+      await this.spawnDefaultPanes(4);
+    }
+
+    this.updateFooter();
+    this.renderEditorTabs();
+    this.renderSidebarSessions();
+  }
+
+  setupIpcListeners() {
+    window.electronAPI.onPtyData(({ paneId, data }) => {
+      const pane = this.panes.get(paneId);
+      if (pane) pane.write(data);
+    });
+
+    window.electronAPI.onPtyExit(({ paneId, exitCode, status }) => {
+      const pane = this.panes.get(paneId);
+      if (pane) {
+        const next = status === 'detached' ? 'detached' : 'exited';
+        pane.setStatus(next);
+        this.showBanner(
+          `Session for "${pane.label}" ended (code ${exitCode ?? '?'}). tmux may have been killed externally — use Restart to recover.`,
+          'error'
+        );
+        this.renderEditorTabs();
+        this.renderSidebarSessions();
+      }
+    });
+  }
+
+  async checkTmux() {
+    const status = await window.electronAPI.checkTmux();
+    if (status.available) {
+      this.tmuxStatusBadge.textContent = status.version ? `tmux ${status.version.replace(/^tmux\s+/i, '')}` : 'tmux active';
+      this.tmuxStatusBadge.className = 'badge badge-success';
+      if (this.statusBar) this.statusBar.classList.remove('tmux-missing');
+    } else {
+      this.tmuxStatusBadge.textContent = 'tmux missing (fallback)';
+      this.tmuxStatusBadge.className = 'badge badge-danger';
+      if (this.statusBar) this.statusBar.classList.add('tmux-missing');
+      this.showBanner(
+        'tmux not found — install it to enable session persistence across restarts: `brew install tmux` (macOS) or `sudo apt install tmux` (Linux). Continuing without persistence for now.',
+        'warning'
+      );
+    }
+    return status;
+  }
+
+  showBanner(msg, kind = 'warning') {
+    this.bannerMessage.textContent = msg;
+    this.notificationBanner.className = `banner banner-${kind === 'error' ? 'error' : 'warning'}`;
+    this.notificationBanner.classList.remove('hidden');
+  }
+
+  hideBanner() {
+    this.notificationBanner.classList.add('hidden');
+  }
+
+  /** Effective pane count including in-flight creates (anti-spam). */
+  effectivePaneCount() {
+    return this.panes.size + this._pendingCreates;
+  }
+
+  async createPane({ id, label, cwd, agentId, customSessionName } = {}) {
+    if (this.effectivePaneCount() >= 6) {
+      this.showBanner('Maximum 6 terminal panes supported simultaneously.');
+      return null;
+    }
+
+    this._pendingCreates += 1;
+    const paneId = id || `pane-${this.paneIdCounter++}`;
+
+    try {
+      // Prevent duplicate IDs
+      if (this.panes.has(paneId)) {
+        this.showBanner(`Pane "${paneId}" already exists.`);
+        return this.panes.get(paneId);
+      }
+
+      const agentObj = this.agentsList.find((a) => a.id === agentId) || this.agentsList.find((a) => a.id === 'shell') || this.agentsList[0];
+      const initialCwd = cwd || '';
+
+      const pane = new TerminalPane({
+        id: paneId,
+        label: label || `Pane ${this.panes.size + 1}`,
+        cwd: initialCwd,
+        agentId: agentId || (agentObj && agentObj.id) || 'shell',
+        onFocus: (pId) => this.focusPane(pId),
+        onClose: (pId) => this.removePane(pId),
+        onRestart: (pId) => this.restartPane(pId, { killTmux: true }),
+        onKill: (pId) => this.killPaneSession(pId),
+        onCwdChange: (pId, newCwd) => this.changePaneCwd(pId, newCwd),
+        onAgentChange: (pId, newAgentId) => this.changePaneAgent(pId, newAgentId),
+        onLabelChange: () => {
+          this.renderEditorTabs();
+          this.renderSidebarSessions();
+          this.updateFooter();
+        },
+        onStatusChange: () => {
+          this.renderEditorTabs();
+          this.renderSidebarSessions();
+        }
+      });
+
+      await pane.init(this.agentsList);
+      this.panes.set(paneId, pane);
+      this.gridManager.addPaneToGrid(pane);
+
+      const dims = pane.getDimensions();
+      let result;
+      try {
+        result = await window.electronAPI.createPty({
+          paneId,
+          cwd: initialCwd,
+          agentCommand: agentObj ? agentObj.command : '',
+          envVars: agentObj ? (agentObj.env || {}) : {},
+          customSessionName,
+          cols: dims.cols,
+          rows: dims.rows
+        });
+      } catch (error) {
+        pane.setStatus('exited');
+        this.showBanner(`Unable to start ${pane.label}: ${error.message}`, 'error');
+        this.renderEditorTabs();
+        this.renderSidebarSessions();
+        this.updateFooter();
+        return pane;
+      }
+
+      if (result && result.cwd) {
+        pane.setCwd(result.cwd);
+      }
+
+      pane.setStatus('running');
+      this.focusPane(paneId);
+      this.updateFooter();
+      this.renderEditorTabs();
+      this.renderSidebarSessions();
+      return pane;
+    } finally {
+      this._pendingCreates = Math.max(0, this._pendingCreates - 1);
+    }
+  }
+
+  async removePane(paneId) {
+    const pane = this.panes.get(paneId);
+    if (!pane) return;
+
+    // Guard: remove from map first to prevent double-calls on rapid clicks
+    this.panes.delete(paneId);
+
+    // Detach PTY without killing tmux (persistence)
+    try {
+      await window.electronAPI.destroyPty(paneId, false);
+    } catch (err) {
+      console.warn('destroyPty failed', err);
+    }
+    this.gridManager.removePaneFromGrid(paneId);
+
+    if (this.focusedPaneId === paneId) {
+      this.focusedPaneId = null;
+      const remaining = Array.from(this.panes.keys());
+      if (remaining.length > 0) this.focusPane(remaining[0]);
+    }
+
+    this.updateFooter();
+    this.renderEditorTabs();
+    this.renderSidebarSessions();
+  }
+
+  /**
+   * Restart pane. When killTmux is true (default for UI Restart), kill the old
+   * tmux session first so -A does not reattach to a dead/stale session.
+   */
+  async restartPane(paneId, { killTmux = true } = {}) {
+    const pane = this.panes.get(paneId);
+    if (!pane) return;
+
+    const agentObj = this.agentsList.find((a) => a.id === pane.agentId);
+    const dims = pane.getDimensions();
+
+    pane.setStatus('idle');
+    pane.clearTerminal();
+    try {
+      if (killTmux) {
+        await window.electronAPI.destroyPty(paneId, true);
+      }
+      await window.electronAPI.restartPty({
+        paneId,
+        cwd: pane.cwd,
+        agentCommand: agentObj ? agentObj.command : '',
+        envVars: agentObj ? (agentObj.env || {}) : {},
+        cols: dims.cols,
+        rows: dims.rows
+      });
+      pane.setStatus('running');
+      // Refit after restart so PTY gets correct size
+      requestAnimationFrame(() => pane.fit());
+    } catch (error) {
+      pane.setStatus('exited');
+      this.showBanner(`Unable to restart ${pane.label}: ${error.message}`, 'error');
+    }
+    this.renderEditorTabs();
+    this.renderSidebarSessions();
+  }
+
+  async killPaneSession(paneId) {
+    const pane = this.panes.get(paneId);
+    if (!pane) return;
+
+    // Skip confirm in test mode
+    const ok = window.__IDE_TEST_MODE__ || confirm(`Kill persistent tmux session for ${pane.label}?`);
+    if (!ok) return;
+
+    try {
+      await window.electronAPI.destroyPty(paneId, true);
+      pane.setStatus('exited');
+      pane.write('\r\n\x1b[31m[session killed]\x1b[0m\r\n');
+    } catch (error) {
+      this.showBanner(`Failed to kill session: ${error.message}`, 'error');
+    }
+    this.renderEditorTabs();
+    this.renderSidebarSessions();
+  }
+
+  async changePaneCwd(paneId, newCwd) {
+    const pane = this.panes.get(paneId);
+    if (pane) pane.setCwd(newCwd);
+    await this.restartPane(paneId, { killTmux: true });
+  }
+
+  async changePaneAgent(paneId, newAgentId) {
+    const pane = this.panes.get(paneId);
+    if (pane) pane.agentId = newAgentId;
+    await this.restartPane(paneId, { killTmux: true });
+  }
+
+  focusPane(paneId) {
+    if (!this.panes.has(paneId)) return;
+    this.focusedPaneId = paneId;
+    for (const [id, pane] of this.panes.entries()) {
+      pane.setFocused(id === paneId);
+    }
+    this.updateFooter();
+    this.renderEditorTabs();
+    this.renderSidebarSessions();
+  }
+
+  async spawnDefaultPanes(count = 4) {
+    for (let i = 1; i <= count; i++) {
+      await this.createPane({
+        id: `pane-${i}`,
+        label: `Shell ${i}`,
+        agentId: 'shell'
+      });
+    }
+    this.paneIdCounter = Math.max(this.paneIdCounter, count + 1);
+  }
+
+  async killAllSessions() {
+    const ok = window.__IDE_TEST_MODE__ || confirm('Kill all active and orphaned tmux sessions?');
+    if (!ok) return;
+
+    try {
+      await window.electronAPI.killAllSessions();
+    } catch (err) {
+      this.showBanner(`Kill all failed: ${err.message}`, 'error');
+    }
+    // Mark all panes exited, then clear the grid (which calls destroy on each)
+    for (const pane of this.panes.values()) {
+      pane.status = 'exited'; // raw set — don't trigger callbacks on dead panes
+    }
+    this.panes.clear();
+    this.gridManager.clearAll();
+    this.focusedPaneId = null;
+    this.updateFooter();
+    this.renderEditorTabs();
+    this.renderSidebarSessions();
+  }
+
+  showOrphanModal(orphans) {
+    this.orphansList.innerHTML = '';
+    orphans.forEach((sessionName) => {
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <span><strong>${this.escapeHtml(sessionName)}</strong></span>
+        <button class="btn btn-primary btn-reattach-single" data-session="${this.escapeHtml(sessionName)}" type="button">Reattach</button>
+      `;
+      this.orphansList.appendChild(li);
+    });
+
+    this.orphansList.querySelectorAll('.btn-reattach-single').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const sName = e.currentTarget.dataset.session;
+        await this.createPane({
+          id: sName.replace(/^ide-/, ''),
+          label: sName,
+          customSessionName: sName,
+          agentId: 'shell'
+        });
+        e.currentTarget.closest('li').remove();
+        if (this.orphansList.children.length === 0) {
+          this.modalOrphans.classList.add('hidden');
+        }
+      });
+    });
+
+    this.modalOrphans.classList.remove('hidden');
+  }
+
+  async reattachAllOrphans(orphans) {
+    for (const sessionName of orphans) {
+      await this.createPane({
+        id: sessionName.replace(/^ide-/, ''),
+        label: sessionName,
+        customSessionName: sessionName,
+        agentId: 'shell'
+      });
+    }
+    this.modalOrphans.classList.add('hidden');
+  }
+
+  async loadWorkspaceOptions() {
+    this.workspaces = await window.electronAPI.getWorkspaces() || {};
+    this.workspaceSelect.innerHTML = '<option value="">— Workspace —</option>';
+    for (const name of Object.keys(this.workspaces)) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      this.workspaceSelect.appendChild(opt);
+    }
+    if (this.activeWorkspaceName) {
+      this.workspaceSelect.value = this.activeWorkspaceName;
+    }
+    this.renderSidebarWorkspaces();
+  }
+
+  async saveCurrentWorkspace() {
+    const suggested = this.activeWorkspaceName || 'My Project Workspace';
+    const name = window.__IDE_TEST_MODE__
+      ? (window.__IDE_TEST_WORKSPACE_NAME__ || suggested)
+      : prompt('Enter a name for this workspace preset:', suggested);
+    if (!name || !String(name).trim()) return;
+
+    const paneConfigs = [];
+    for (const pane of this.panes.values()) {
+      paneConfigs.push({
+        id: pane.id,
+        label: pane.label,
+        cwd: pane.cwd,
+        agentId: pane.agentId
+      });
+    }
+
+    const layout = {
+      preset: this.gridManager.preset,
+      panes: paneConfigs
+    };
+
+    await window.electronAPI.saveWorkspace(String(name).trim(), layout);
+    this.activeWorkspaceName = String(name).trim();
+    await this.loadWorkspaceOptions();
+    this.workspaceSelect.value = this.activeWorkspaceName;
+    this.updateFooter();
+    if (!window.__IDE_TEST_MODE__) {
+      this.showBanner(`Workspace "${this.activeWorkspaceName}" saved.`);
+    }
+  }
+
+  async loadSelectedWorkspace(name) {
+    if (!name) return;
+    const workspace = await window.electronAPI.loadWorkspace(name);
+    if (!workspace) {
+      this.showBanner(`Workspace "${name}" not found.`, 'error');
+      return;
+    }
+
+    // Teardown existing panes (detach only)
+    for (const paneId of Array.from(this.panes.keys())) {
+      await this.removePane(paneId);
+    }
+
+    if (workspace.preset) {
+      this.gridManager.setPreset(workspace.preset);
+      this.btnPreset2x3.classList.toggle('active', workspace.preset === '2x3');
+      this.btnPreset3x2.classList.toggle('active', workspace.preset === '3x2');
+    }
+
+    if (workspace.panes && Array.isArray(workspace.panes)) {
+      for (const pConf of workspace.panes) {
+        await this.createPane({
+          id: pConf.id,
+          label: pConf.label,
+          cwd: pConf.cwd,
+          agentId: pConf.agentId
+        });
+      }
+    }
+
+    this.activeWorkspaceName = name;
+    this.workspaceSelect.value = name;
+    this.updateFooter();
+    this.renderSidebarWorkspaces();
+  }
+
+  async deleteSelectedWorkspace() {
+    const name = this.workspaceSelect.value;
+    if (!name) {
+      this.showBanner('Select a saved workspace to delete.');
+      return;
+    }
+    const ok = window.__IDE_TEST_MODE__ || confirm(`Delete saved workspace "${name}"?`);
+    if (!ok) return;
+    await window.electronAPI.deleteWorkspace(name);
+    if (this.activeWorkspaceName === name) this.activeWorkspaceName = null;
+    await this.loadWorkspaceOptions();
+    this.updateFooter();
+  }
+
+  /* ---------- Editor tabs ---------- */
+  renderEditorTabs() {
+    if (!this.editorTabsScroll) return;
+    this.editorTabsScroll.innerHTML = '';
+    for (const pane of this.panes.values()) {
+      const tab = document.createElement('div');
+      tab.className = 'editor-tab';
+      tab.dataset.paneId = pane.id;
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', pane.id === this.focusedPaneId ? 'true' : 'false');
+      if (pane.id === this.focusedPaneId) tab.classList.add('active');
+      if (pane.status === 'running') tab.classList.add('running');
+
+      tab.innerHTML = `
+        <span class="editor-tab-icon">&gt;_</span>
+        <span class="editor-tab-label" title="${this.escapeHtml(pane.label)}">${this.escapeHtml(pane.label)}</span>
+        <button class="editor-tab-action" type="button" title="Close" aria-label="Close ${this.escapeHtml(pane.label)}">×</button>
+      `;
+
+      tab.addEventListener('click', (e) => {
+        if (e.target.closest('.editor-tab-action')) return;
+        this.focusPane(pane.id);
+      });
+      tab.querySelector('.editor-tab-action').addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.removePane(pane.id);
+      });
+
+      this.editorTabsScroll.appendChild(tab);
+    }
+  }
+
+  /* ---------- Sidebar ---------- */
+  renderSidebarSessions() {
+    if (!this.sidebarSessionsList) return;
+    this.sidebarSessionsList.innerHTML = '';
+    if (this.panes.size === 0) {
+      this.sidebarSessionsList.innerHTML = '<div class="tree-empty">No active panes</div>';
+      return;
+    }
+    for (const pane of this.panes.values()) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'tree-item' + (pane.id === this.focusedPaneId ? ' active' : '');
+      row.dataset.paneId = pane.id;
+      row.innerHTML = `
+        <span class="tree-dot ${pane.status}"></span>
+        <span class="tree-label">${this.escapeHtml(pane.label)}</span>
+        <span class="tree-meta">${pane.status}</span>
+      `;
+      row.addEventListener('click', () => this.focusPane(pane.id));
+      this.sidebarSessionsList.appendChild(row);
+    }
+  }
+
+  renderSidebarWorkspaces() {
+    if (!this.sidebarWorkspacesList) return;
+    this.sidebarWorkspacesList.innerHTML = '';
+    const names = Object.keys(this.workspaces || {});
+    if (names.length === 0) {
+      this.sidebarWorkspacesList.innerHTML = '<div class="tree-empty">Save a layout from the toolbar</div>';
+      return;
+    }
+    names.forEach((name) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'tree-item' + (name === this.activeWorkspaceName ? ' active' : '');
+      row.innerHTML = `
+        <span class="tree-label">${this.escapeHtml(name)}</span>
+        <span class="tree-meta">load</span>
+      `;
+      row.addEventListener('click', () => {
+        this.workspaceSelect.value = name;
+        this.loadSelectedWorkspace(name);
+      });
+      this.sidebarWorkspacesList.appendChild(row);
+    });
+  }
+
+  renderSidebarAgents() {
+    if (!this.sidebarAgentsList) return;
+    this.sidebarAgentsList.innerHTML = '';
+    if (!this.agentsList.length) {
+      this.sidebarAgentsList.innerHTML = '<div class="tree-empty">No agent presets</div>';
+      return;
+    }
+    this.agentsList.forEach((agent) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'tree-item agent-item';
+      row.title = agent.description || agent.command || agent.name;
+      row.innerHTML = `
+        <span class="tree-label">${this.escapeHtml(agent.name)}</span>
+        <span class="tree-meta agent-cmd">${this.escapeHtml(agent.command || 'shell')}</span>
+      `;
+      row.addEventListener('click', () => {
+        const targetId = this.focusedPaneId || Array.from(this.panes.keys())[0];
+        this.openRunAgentModal({ targetPaneId: targetId, selectedAgentId: agent.id });
+      });
+      this.sidebarAgentsList.appendChild(row);
+    });
+  }
+
+  openRunAgentModal({ targetPaneId, selectedAgentId }) {
+    if (!this.modalRunAgent) return;
+    this._runAgentTargetPaneId = targetPaneId || (this.focusedPaneId || Array.from(this.panes.keys())[0]);
+    this.runAgentSelect.innerHTML = '';
+    this.agentsList.forEach((agent) => {
+      const opt = document.createElement('option');
+      opt.value = agent.id;
+      opt.textContent = agent.name;
+      if (agent.id === selectedAgentId) opt.selected = true;
+      this.runAgentSelect.appendChild(opt);
+    });
+
+    const updateDesc = () => {
+      const selected = this.agentsList.find((a) => a.id === this.runAgentSelect.value);
+      if (this.runAgentDesc) {
+        this.runAgentDesc.textContent = selected ? (selected.description || selected.command || selected.name) : '';
+      }
+    };
+    this.runAgentSelect.onchange = updateDesc;
+    updateDesc();
+
+    this.modalRunAgent.classList.remove('hidden');
+  }
+
+  closeRunAgentModal() {
+    if (this.modalRunAgent) this.modalRunAgent.classList.add('hidden');
+  }
+
+  executeAgent({ targetPaneId, agentId, scope }) {
+    const agentObj = this.agentsList.find((a) => a.id === agentId);
+    if (!agentObj) return;
+
+    const cmd = agentObj.command || '';
+
+    if (scope === 'single') {
+      const pane = this.panes.get(targetPaneId);
+      if (pane) {
+        if (cmd.trim()) {
+          window.electronAPI.writePty(pane.id, cmd + '\r');
+        }
+        pane.agentId = agentObj.id;
+        pane.label = agentObj.name;
+        pane.labelInput.value = agentObj.name;
+        pane.agentSelect.value = agentObj.id;
+      }
+    } else if (scope === 'all') {
+      let idx = 1;
+      for (const pane of this.panes.values()) {
+        if (cmd.trim()) {
+          window.electronAPI.writePty(pane.id, cmd + '\r');
+        }
+        pane.agentId = agentObj.id;
+        const nameLabel = this.panes.size > 1 ? `${agentObj.name} ${idx++}` : agentObj.name;
+        pane.label = nameLabel;
+        pane.labelInput.value = nameLabel;
+        pane.agentSelect.value = agentObj.id;
+      }
+    }
+
+    this.renderEditorTabs();
+    this.renderSidebarSessions();
+    this.updateFooter();
+  }
+
+  toggleSidebarSection(section) {
+    const header = document.querySelector(`[data-toggle-section="${section}"]`);
+    const content = document.querySelector(`.sidebar-section[data-section="${section}"] .sidebar-section-content`);
+    if (!header || !content) return;
+    const chevron = header.querySelector('.codicon-chevron');
+    const collapsed = content.classList.toggle('collapsed');
+    if (chevron) chevron.classList.toggle('expanded', !collapsed);
+  }
+
+  toggleSidebar(force) {
+    this.sidebarCollapsed = force != null ? force : !this.sidebarCollapsed;
+    if (this.sideBar) this.sideBar.classList.toggle('collapsed', this.sidebarCollapsed);
+    if (this.appShell) this.appShell.classList.toggle('sidebar-collapsed', this.sidebarCollapsed);
+    // Reflow terminals after layout change — use transitionend for animated sidebar
+    const onDone = () => {
+      this.gridManager && this.gridManager.reflowAll();
+    };
+    if (this.sideBar) {
+      this.sideBar.addEventListener('transitionend', onDone, { once: true });
+    }
+    // Fallback in case transitionend doesn't fire
+    setTimeout(onDone, 200);
+  }
+
+  setupSidebarResize() {
+    const sash = document.getElementById('sidebar-sash');
+    if (!sash || !this.sideBar) return;
+    sash.addEventListener('pointerdown', (e) => {
+      if (this.sidebarCollapsed) return;
+      e.preventDefault();
+      sash.classList.add('dragging');
+      sash.setPointerCapture(e.pointerId);
+      const startX = e.clientX;
+      const startW = this.sideBar.getBoundingClientRect().width;
+      const onMove = (ev) => {
+        const next = Math.min(480, Math.max(160, startW + (ev.clientX - startX)));
+        this.sidebarWidth = next;
+        this.sideBar.style.width = `${next}px`;
+        this.sideBar.style.flexBasis = `${next}px`;
+        this.gridManager && this.gridManager.reflowAll();
+      };
+      const onUp = () => {
+        sash.classList.remove('dragging');
+        try { sash.releasePointerCapture(e.pointerId); } catch (_) {}
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        this.gridManager && this.gridManager.reflowAll();
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+  }
+
+  /* ---------- Command Palette ---------- */
+  getCommands() {
+    return [
+      { id: 'new-pane', label: 'Terminal: New Pane', accel: 'Ctrl+Shift+N', run: () => this.createPane({}) },
+      { id: 'close-pane', label: 'Terminal: Close Focused Pane', accel: 'Ctrl+Shift+W', run: () => this.focusedPaneId && this.removePane(this.focusedPaneId) },
+      { id: 'broadcast', label: 'Terminal: Toggle Broadcast Mode', accel: 'Ctrl+Shift+B', run: () => window.broadcastManager.toggle() },
+      { id: 'kill-all', label: 'Terminal: Kill All Sessions', accel: 'Ctrl+Shift+K', run: () => this.killAllSessions() },
+      { id: 'save-ws', label: 'Workspace: Save Current Layout', accel: '', run: () => this.saveCurrentWorkspace() },
+      { id: 'load-ws', label: 'Workspace: Open Select…', accel: '', run: () => this.workspaceSelect && this.workspaceSelect.focus() },
+      { id: 'grid-2x3', label: 'View: 2×3 Grid Layout', accel: '', run: () => this.setGridPreset('2x3') },
+      { id: 'grid-3x2', label: 'View: 3×2 Grid Layout', accel: '', run: () => this.setGridPreset('3x2') },
+      { id: 'toggle-sidebar', label: 'View: Toggle Side Bar', accel: 'Ctrl+B', run: () => this.toggleSidebar() },
+      { id: 'search', label: 'Terminal: Search Scrollback', accel: 'Ctrl+F', run: () => this.searchFocusedTerminal() },
+      { id: 'help', label: 'Help: Keyboard Shortcuts', accel: '', run: () => this.modalHelp.classList.remove('hidden') },
+      { id: 'focus-1', label: 'Terminal: Focus Pane 1', accel: 'Ctrl+1', run: () => this.focusPaneByIndex(0) },
+      { id: 'focus-2', label: 'Terminal: Focus Pane 2', accel: 'Ctrl+2', run: () => this.focusPaneByIndex(1) },
+      { id: 'focus-3', label: 'Terminal: Focus Pane 3', accel: 'Ctrl+3', run: () => this.focusPaneByIndex(2) },
+      { id: 'focus-4', label: 'Terminal: Focus Pane 4', accel: 'Ctrl+4', run: () => this.focusPaneByIndex(3) },
+      { id: 'check-tmux', label: 'tmux: Recheck Connection', accel: '', run: () => this.checkTmux() },
+      { id: 'list-orphans', label: 'tmux: Show Orphan Sessions', accel: '', run: async () => {
+        const orphans = await window.electronAPI.listOrphans();
+        if (orphans.length) this.showOrphanModal(orphans);
+        else this.showBanner('No orphaned ide-* tmux sessions found.');
+      }}
+    ];
+  }
+
+  setupCommandPalette() {
+    const openBtn = document.getElementById('btn-command-palette');
+    if (openBtn) openBtn.addEventListener('click', () => this.openCommandPalette());
+
+    this.commandPalette.addEventListener('click', (e) => {
+      if (e.target === this.commandPalette) this.closeCommandPalette();
+    });
+
+    this.commandPaletteInput.addEventListener('input', () => this.filterCommandPalette());
+    this.commandPaletteInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.closeCommandPalette();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.commandPaletteIndex = Math.min(this.commandPaletteIndex + 1, this.commandPaletteFiltered.length - 1);
+        this.renderCommandPaletteList();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.commandPaletteIndex = Math.max(this.commandPaletteIndex - 1, 0);
+        this.renderCommandPaletteList();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        this.runSelectedCommand();
+      }
+    });
+  }
+
+  openCommandPalette() {
+    this.commandPalette.classList.remove('hidden');
+    this.commandPaletteInput.value = '';
+    this.commandPaletteIndex = 0;
+    this.filterCommandPalette();
+    setTimeout(() => this.commandPaletteInput.focus(), 0);
+  }
+
+  closeCommandPalette() {
+    this.commandPalette.classList.add('hidden');
+  }
+
+  filterCommandPalette() {
+    const q = (this.commandPaletteInput.value || '').trim().toLowerCase();
+    const all = this.getCommands();
+    this.commandPaletteFiltered = q
+      ? all.filter((c) => c.label.toLowerCase().includes(q) || c.id.includes(q))
+      : all;
+    this.commandPaletteIndex = 0;
+    this.renderCommandPaletteList();
+  }
+
+  renderCommandPaletteList() {
+    this.commandPaletteList.innerHTML = '';
+    if (!this.commandPaletteFiltered.length) {
+      this.commandPaletteList.innerHTML = '<li class="command-palette-empty">No matching commands</li>';
+      return;
+    }
+    this.commandPaletteFiltered.forEach((cmd, i) => {
+      const li = document.createElement('li');
+      li.className = 'command-palette-item' + (i === this.commandPaletteIndex ? ' selected' : '');
+      li.setAttribute('role', 'option');
+      li.innerHTML = `<span class="cmd-label">${this.escapeHtml(cmd.label)}</span><span class="cmd-accel">${this.escapeHtml(cmd.accel || '')}</span>`;
+      li.addEventListener('click', () => {
+        this.commandPaletteIndex = i;
+        this.runSelectedCommand();
+      });
+      this.commandPaletteList.appendChild(li);
+    });
+    const selected = this.commandPaletteList.querySelector('.selected');
+    if (selected) selected.scrollIntoView({ block: 'nearest' });
+  }
+
+  runSelectedCommand() {
+    const cmd = this.commandPaletteFiltered[this.commandPaletteIndex];
+    this.closeCommandPalette();
+    if (cmd && typeof cmd.run === 'function') {
+      Promise.resolve(cmd.run()).catch((err) => {
+        this.showBanner(err.message || String(err), 'error');
+      });
+    }
+  }
+
+  /* ---------- Menubar ---------- */
+  setupMenubar() {
+    const menus = {
+      file: [
+        { label: 'New Pane', accel: 'Ctrl+Shift+N', run: () => this.createPane({}) },
+        { label: 'Save Workspace…', run: () => this.saveCurrentWorkspace() },
+        { label: 'Delete Workspace', run: () => this.deleteSelectedWorkspace() },
+        { sep: true },
+        { label: 'Kill All Sessions', accel: 'Ctrl+Shift+K', run: () => this.killAllSessions() }
+      ],
+      terminal: [
+        { label: 'New Pane', accel: 'Ctrl+Shift+N', run: () => this.createPane({}) },
+        { label: 'Close Pane', accel: 'Ctrl+Shift+W', run: () => this.focusedPaneId && this.removePane(this.focusedPaneId) },
+        { label: 'Toggle Broadcast', accel: 'Ctrl+Shift+B', run: () => window.broadcastManager.toggle() },
+        { sep: true },
+        { label: 'Search Scrollback', accel: 'Ctrl+F', run: () => this.searchFocusedTerminal() }
+      ],
+      view: [
+        { label: 'Command Palette…', accel: 'Ctrl+Shift+P', run: () => this.openCommandPalette() },
+        { label: 'Toggle Side Bar', accel: 'Ctrl+B', run: () => this.toggleSidebar() },
+        { sep: true },
+        { label: '2×3 Grid', run: () => this.setGridPreset('2x3') },
+        { label: '3×2 Grid', run: () => this.setGridPreset('3x2') }
+      ],
+      help: [
+        { label: 'Keyboard Shortcuts', run: () => this.modalHelp.classList.remove('hidden') }
+      ]
+    };
+
+    document.querySelectorAll('.menubar-item').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const key = btn.dataset.menu;
+        const items = menus[key];
+        if (!items) return;
+        this.openMenubarDropdown(btn, items);
+      });
+    });
+
+    document.addEventListener('click', () => this.closeMenubarDropdown());
+  }
+
+  openMenubarDropdown(anchor, items) {
+    const rect = anchor.getBoundingClientRect();
+    this.menubarDropdown.innerHTML = '';
+    items.forEach((item) => {
+      if (item.sep) {
+        const sep = document.createElement('div');
+        sep.className = 'menubar-dropdown-sep';
+        this.menubarDropdown.appendChild(sep);
+        return;
+      }
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'menubar-dropdown-item';
+      b.innerHTML = `<span>${this.escapeHtml(item.label)}</span><span class="accel">${this.escapeHtml(item.accel || '')}</span>`;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.closeMenubarDropdown();
+        item.run && item.run();
+      });
+      this.menubarDropdown.appendChild(b);
+    });
+    this.menubarDropdown.style.left = `${rect.left}px`;
+    this.menubarDropdown.style.top = `${rect.bottom}px`;
+    this.menubarDropdown.classList.remove('hidden');
+    document.querySelectorAll('.menubar-item').forEach((el) => el.classList.remove('open'));
+    anchor.classList.add('open');
+  }
+
+  closeMenubarDropdown() {
+    this.menubarDropdown.classList.add('hidden');
+    document.querySelectorAll('.menubar-item').forEach((el) => el.classList.remove('open'));
+  }
+
+  setGridPreset(preset) {
+    this.gridManager.setPreset(preset);
+    this.btnPreset2x3.classList.toggle('active', preset === '2x3');
+    this.btnPreset3x2.classList.toggle('active', preset === '3x2');
+  }
+
+  focusPaneByIndex(index) {
+    const keys = Array.from(this.panes.keys());
+    if (index >= 0 && index < keys.length) this.focusPane(keys[index]);
+  }
+
+  attachEventListeners() {
+    this.btnAddPane.addEventListener('click', () => this.createPane({}));
+    this.btnKillAll.addEventListener('click', () => this.killAllSessions());
+    this.btnTabAdd.addEventListener('click', () => this.createPane({}));
+    if (this.btnTabClose) {
+      this.btnTabClose.addEventListener('click', () => {
+        if (this.focusedPaneId) this.removePane(this.focusedPaneId);
+        else this.showBanner('Select a terminal pane to close.');
+      });
+    }
+
+    const btnSidebarNew = document.getElementById('btn-sidebar-new-pane');
+    if (btnSidebarNew) btnSidebarNew.addEventListener('click', () => this.createPane({}));
+    const btnSidebarCollapse = document.getElementById('btn-sidebar-collapse');
+    if (btnSidebarCollapse) btnSidebarCollapse.addEventListener('click', () => this.toggleSidebar());
+
+    document.querySelectorAll('.activity-item').forEach((button) => {
+      button.addEventListener('click', () => this.handleActivity(button));
+    });
+
+    document.querySelectorAll('[data-toggle-section]').forEach((btn) => {
+      btn.addEventListener('click', () => this.toggleSidebarSection(btn.dataset.toggleSection));
+    });
+
+    this.btnPreset2x3.addEventListener('click', () => this.setGridPreset('2x3'));
+    this.btnPreset3x2.addEventListener('click', () => this.setGridPreset('3x2'));
+    this.btnSaveWorkspace.addEventListener('click', () => this.saveCurrentWorkspace());
+    this.btnDeleteWorkspace.addEventListener('click', () => this.deleteSelectedWorkspace());
+    this.workspaceSelect.addEventListener('change', (e) => this.loadSelectedWorkspace(e.target.value));
+    this.bannerClose.addEventListener('click', () => this.hideBanner());
+
+    this.btnHelp.addEventListener('click', () => this.modalHelp.classList.remove('hidden'));
+    this.modalHelpClose.addEventListener('click', () => this.modalHelp.classList.add('hidden'));
+    this.modalHelpOk.addEventListener('click', () => this.modalHelp.classList.add('hidden'));
+    this.modalOrphansClose.addEventListener('click', () => this.modalOrphans.classList.add('hidden'));
+
+    if (this.modalRunAgentClose) this.modalRunAgentClose.addEventListener('click', () => this.closeRunAgentModal());
+    if (this.btnRunAgentCancel) this.btnRunAgentCancel.addEventListener('click', () => this.closeRunAgentModal());
+
+    if (this.btnRunAgentSingle) {
+      this.btnRunAgentSingle.addEventListener('click', () => {
+        const agentId = this.runAgentSelect.value;
+        this.closeRunAgentModal();
+        this.executeAgent({ targetPaneId: this._runAgentTargetPaneId, agentId, scope: 'single' });
+      });
+    }
+
+    if (this.btnRunAgentAll) {
+      this.btnRunAgentAll.addEventListener('click', () => {
+        const agentId = this.runAgentSelect.value;
+        this.closeRunAgentModal();
+        this.executeAgent({ targetPaneId: null, agentId, scope: 'all' });
+      });
+    }
+
+    this.btnOrphansReattachAll.addEventListener('click', async () => {
+      // Use the sessions still visible in the modal, not a fresh IPC query,
+      // to avoid double-reattaching sessions the user already individually reattached.
+      const remaining = [...this.orphansList.querySelectorAll('.btn-reattach-single')]
+        .map((btn) => btn.dataset.session)
+        .filter(Boolean);
+      await this.reattachAllOrphans(remaining);
+    });
+    this.btnOrphansKillAll.addEventListener('click', async () => {
+      await window.electronAPI.killAllSessions();
+      this.modalOrphans.classList.add('hidden');
+    });
+
+    // Window resize safety net (in addition to ResizeObserver)
+    window.addEventListener('resize', () => {
+      if (this.gridManager) this.gridManager.reflowAll();
+    });
+  }
+
+  setupKeyboardShortcuts() {
+    window.addEventListener('keydown', (e) => {
+      // Don't steal keys while typing in inputs/selects (except palette/global)
+      const tag = (e.target && e.target.tagName) || '';
+      const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable);
+
+      // Ctrl+Shift+P — Command Palette (always)
+      if (e.ctrlKey && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
+        e.preventDefault();
+        this.openCommandPalette();
+        return;
+      }
+
+      // Escape closes overlays
+      if (e.key === 'Escape') {
+        if (!this.commandPalette.classList.contains('hidden')) {
+          e.preventDefault();
+          this.closeCommandPalette();
+          return;
+        }
+        this.closeMenubarDropdown();
+        return;
+      }
+
+      if (isEditable && e.target !== this.commandPaletteInput) {
+        // Allow Ctrl+1..6 etc. only with modifiers; plain typing goes to input
+        // Still allow global shortcuts with Ctrl+Shift
+      }
+
+      // Ctrl+1..6 — focus pane (requires Ctrl, so typing "1" in shell is safe)
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '6') {
+        const index = parseInt(e.key, 10) - 1;
+        const paneKeys = Array.from(this.panes.keys());
+        if (index < paneKeys.length) {
+          e.preventDefault();
+          this.focusPane(paneKeys[index]);
+        }
+        return;
+      }
+
+      if (e.ctrlKey && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+        e.preventDefault();
+        this.createPane({});
+        return;
+      }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'W' || e.key === 'w')) {
+        e.preventDefault();
+        if (this.focusedPaneId) this.removePane(this.focusedPaneId);
+        return;
+      }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'B' || e.key === 'b')) {
+        e.preventDefault();
+        window.broadcastManager.toggle();
+        return;
+      }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'K' || e.key === 'k')) {
+        e.preventDefault();
+        this.killAllSessions();
+        return;
+      }
+      // Ctrl+B — toggle sidebar (not when shift held)
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
+        // Skip if focus is inside an xterm terminal — Ctrl+B is the tmux prefix key.
+        // Only intercept when focus is on a non-terminal element (matching VS Code behavior).
+        const inTerminal = e.target && (e.target.closest('.xterm') || e.target.classList.contains('xterm-helper-textarea'));
+        if (inTerminal) return; // let tmux handle it
+        e.preventDefault();
+        this.toggleSidebar();
+        return;
+      }
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'F' || e.key === 'f')) {
+        e.preventDefault();
+        this.searchFocusedTerminal();
+      }
+    }, true);
+  }
+
+  handleActivity(button) {
+    document.querySelectorAll('.activity-item').forEach((item) => item.classList.remove('active'));
+    button.classList.add('active');
+    const activity = button.dataset.activity;
+
+    if (activity === 'explorer' || activity === 'agents' || activity === 'terminal') {
+      if (this.sidebarCollapsed) this.toggleSidebar(false);
+      const title = document.getElementById('side-bar-title');
+      if (title) {
+        title.textContent = activity === 'agents' ? 'AGENTS'
+          : activity === 'terminal' ? 'TERMINALS' : 'EXPLORER';
+      }
+      if (activity === 'terminal') {
+        const pane = this.panes.get(this.focusedPaneId) || this.panes.values().next().value;
+        if (pane) this.focusPane(pane.id);
+      }
+    } else if (activity === 'search') {
+      this.searchFocusedTerminal();
+    } else if (activity === 'settings') {
+      this.modalHelp.classList.remove('hidden');
+    }
+  }
+
+  searchFocusedTerminal() {
+    const pane = this.panes.get(this.focusedPaneId);
+    if (!pane || !pane.searchAddon) {
+      this.showBanner('Select an active terminal pane before searching.');
+      return;
+    }
+    const query = window.__IDE_TEST_MODE__
+      ? (window.__IDE_TEST_SEARCH_QUERY__ || '')
+      : prompt('Search terminal scrollback:');
+    if (query) {
+      pane.searchAddon.findNext(query, {
+        incremental: false,
+        decorations: { activeMatchBackground: '#264f78', matchBackground: '#623d18' }
+      });
+    }
+  }
+
+  updateFooter() {
+    const total = this.panes.size;
+    if (this.panesCountEl) this.panesCountEl.textContent = `Sessions: ${total}/6`;
+    if (this.sidebarPaneCountEl) this.sidebarPaneCountEl.textContent = String(total);
+
+    if (this.focusedPaneId) {
+      const pane = this.panes.get(this.focusedPaneId);
+      if (this.focusedPaneInfo) {
+        this.focusedPaneInfo.textContent = `Focused: ${pane ? pane.label : this.focusedPaneId}`;
+      }
+    } else if (this.focusedPaneInfo) {
+      this.focusedPaneInfo.textContent = 'Focused: None';
+    }
+
+    if (this.statusWorkspace) {
+      this.statusWorkspace.textContent = `Workspace: ${this.activeWorkspaceName || 'Default'}`;
+    }
+    if (this.titlebarTitle) {
+      const ws = this.activeWorkspaceName || 'Untitled';
+      this.titlebarTitle.textContent = `${ws} — Agent Terminal IDE`;
+    }
+
+    // Keep broadcast status in sync
+    if (window.broadcastManager) window.broadcastManager.updateUI();
+  }
+
+  escapeHtml(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const app = new AppController();
+  window.appInstance = app;
+  app.init().catch((err) => {
+    console.error('App init failed:', err);
+  });
+});

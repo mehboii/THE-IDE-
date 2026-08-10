@@ -1,0 +1,69 @@
+{
+  "name": "agent-terminal-ide",
+  "version": "1.0.0",
+  "description": "Desktop Terminal IDE for managing multiple CLI coding agents (Claude, Codex, Aider) simultaneously in a grid layout",
+  "main": "main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "npx @electron/rebuild -v 31.2.0",
+    "postinstall": "npx @electron/rebuild -v 31.2.0",
+    "dist": "electron-builder --linux",
+    "dist:mac": "electron-builder --mac",
+    "test:smoke": "node test/smoke.js"
+  },
+  "keywords": [
+    "electron",
+    "terminal",
+    "grid",
+    "tmux",
+    "claude-code",
+    "codex",
+    "aider",
+    "pty",
+    "xterm"
+  ],
+  "author": "Antigravity",
+  "license": "MIT",
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-search": "^0.15.0",
+    "@xterm/addon-webgl": "^0.18.0",
+    "@xterm/xterm": "^5.5.0",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "electron": "^31.2.0",
+    "electron-builder": "^24.13.3",
+    "playwright": "^1.51.1"
+  },
+  "build": {
+    "appId": "com.antigravity.agent-terminal-ide",
+    "productName": "Agent Terminal IDE",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main/**/*",
+      "preload/**/*",
+      "renderer/**/*",
+      "config/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools"
+    }
+  }
+}

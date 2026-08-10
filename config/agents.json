@@ -1,0 +1,32 @@
+{
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "command": "claude",
+      "description": "Anthropic's Claude Code CLI assistant",
+      "env": {}
+    },
+    {
+      "id": "codex",
+      "name": "Codex CLI",
+      "command": "codex",
+      "description": "OpenAI Codex CLI coding assistant",
+      "env": {}
+    },
+    {
+      "id": "aider",
+      "name": "Aider AI",
+      "command": "aider",
+      "description": "Aider AI pair programmer in terminal",
+      "env": {}
+    },
+    {
+      "id": "shell",
+      "name": "Default Shell",
+      "command": "",
+      "description": "Standard system interactive terminal shell (bash/zsh)",
+      "env": {}
+    }
+  ]
+}
