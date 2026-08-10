@@ -66,6 +66,19 @@ class AppController {
     this.commandPaletteInput = document.getElementById('command-palette-input');
     this.commandPaletteList = document.getElementById('command-palette-list');
     this.menubarDropdown = document.getElementById('menubar-dropdown');
+
+    // View Mode & Code Viewer DOM refs
+    this.btnViewTerminals = document.getElementById('btn-view-terminals');
+    this.btnViewSplit = document.getElementById('btn-view-split');
+    this.btnViewEditor = document.getElementById('btn-view-editor');
+    this.workbenchSplitWrapper = document.getElementById('workbench-split-wrapper');
+    this.workbenchSash = document.getElementById('workbench-sash');
+    this.terminalSplitPanel = document.getElementById('terminal-split-panel');
+    this.editorSplitPanel = document.getElementById('editor-split-panel');
+
+    this.fileExplorer = null;
+    this.codeEditorManager = null;
+    this.viewMode = localStorage.getItem('ide_view_mode') || 'terminals';
   }
 
   async init() {
@@ -86,11 +99,42 @@ class AppController {
     this.setupCommandPalette();
     this.setupMenubar();
 
+    // Initialize File Explorer & Code Editor Manager
+    this.fileExplorer = new FileExplorer(
+      document.getElementById('sidebar-file-tree'),
+      document.getElementById('btn-sidebar-open-folder')
+    );
+    this.codeEditorManager = new CodeEditorManager(
+      document.getElementById('monaco-editor-container'),
+      document.getElementById('code-editor-tabs'),
+      () => this.getPanesListForCodeEditor()
+    );
+
+    this.fileExplorer.onFileSelect((filePath) => {
+      this.codeEditorManager.openFile(filePath);
+      // Auto-switch to split or editor view if currently in terminals-only mode when opening a file
+      if (this.viewMode === 'terminals') {
+        this.setViewMode('split');
+      }
+    });
+
+    this.setupViewModeSwitcher();
+    this.setupSplitSashResize();
+    this.setViewMode(this.viewMode);
+
     const orphans = await window.electronAPI.listOrphans();
     if (orphans && orphans.length > 0 && !window.__IDE_TEST_MODE__) {
       this.showOrphanModal(orphans);
     } else {
       await this.spawnDefaultPanes(4);
+    }
+
+    // Set initial file tree root to active working directory
+    const firstPane = this.panes.get('pane-1') || this.panes.values().next().value;
+    if (firstPane && firstPane.cwd) {
+      this.fileExplorer.setRootDirectory(firstPane.cwd);
+    } else {
+      this.fileExplorer.setRootDirectory('/Volumes/LINUX MINT/vs code ');
     }
 
     this.updateFooter();
@@ -331,6 +375,10 @@ class AppController {
     this.focusedPaneId = paneId;
     for (const [id, pane] of this.panes.entries()) {
       pane.setFocused(id === paneId);
+    }
+    const pane = this.panes.get(paneId);
+    if (pane && pane.cwd && this.fileExplorer) {
+      this.fileExplorer.setRootDirectory(pane.cwd);
     }
     this.updateFooter();
     this.renderEditorTabs();
@@ -1146,6 +1194,99 @@ class AppController {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  getPanesListForCodeEditor() {
+    return Array.from(this.panes.values()).map(p => ({
+      id: p.id,
+      title: p.label,
+      status: p.status
+    }));
+  }
+
+  setupViewModeSwitcher() {
+    if (this.btnViewTerminals) {
+      this.btnViewTerminals.addEventListener('click', () => this.setViewMode('terminals'));
+    }
+    if (this.btnViewSplit) {
+      this.btnViewSplit.addEventListener('click', () => this.setViewMode('split'));
+    }
+    if (this.btnViewEditor) {
+      this.btnViewEditor.addEventListener('click', () => this.setViewMode('editor'));
+    }
+  }
+
+  setViewMode(mode) {
+    if (!['terminals', 'split', 'editor'].includes(mode)) return;
+    this.viewMode = mode;
+    localStorage.setItem('ide_view_mode', mode);
+
+    [this.btnViewTerminals, this.btnViewSplit, this.btnViewEditor].forEach(btn => {
+      if (btn) btn.classList.remove('active');
+    });
+
+    if (mode === 'terminals' && this.btnViewTerminals) this.btnViewTerminals.classList.add('active');
+    if (mode === 'split' && this.btnViewSplit) this.btnViewSplit.classList.add('active');
+    if (mode === 'editor' && this.btnViewEditor) this.btnViewEditor.classList.add('active');
+
+    if (this.workbenchSplitWrapper) {
+      this.workbenchSplitWrapper.className = `workbench-split-wrapper mode-${mode}`;
+    }
+
+    // Reflow terminals & Monaco editor after layout shift
+    requestAnimationFrame(() => {
+      this.gridManager.fitAll();
+      if (this.codeEditorManager && this.codeEditorManager.editor) {
+        this.codeEditorManager.editor.layout();
+      }
+    });
+  }
+
+  setupSplitSashResize() {
+    if (!this.workbenchSash || !this.terminalSplitPanel || !this.editorSplitPanel) return;
+
+    let isDragging = false;
+    let startX = 0;
+    let startTerminalWidth = 0;
+    let startEditorWidth = 0;
+
+    this.workbenchSash.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      startX = e.clientX;
+      startTerminalWidth = this.terminalSplitPanel.getBoundingClientRect().width;
+      startEditorWidth = this.editorSplitPanel.getBoundingClientRect().width;
+      this.workbenchSash.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - startX;
+      const totalWidth = startTerminalWidth + startEditorWidth;
+      const newTerminalWidth = Math.max(150, Math.min(totalWidth - 150, startTerminalWidth + dx));
+      const newEditorWidth = totalWidth - newTerminalWidth;
+
+      const terminalFlex = newTerminalWidth / totalWidth;
+      const editorFlex = newEditorWidth / totalWidth;
+
+      this.terminalSplitPanel.style.flex = `${terminalFlex}`;
+      this.editorSplitPanel.style.flex = `${editorFlex}`;
+
+      this.gridManager.fitAll();
+      if (this.codeEditorManager && this.codeEditorManager.editor) {
+        this.codeEditorManager.editor.layout();
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        this.workbenchSash.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    });
   }
 }
 

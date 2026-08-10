@@ -37,7 +37,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteWorkspace: (name) => ipcRenderer.invoke('workspaces:delete', { name }),
 
   // System Dialogs
-  selectDirectory: (defaultPath) => ipcRenderer.invoke('dialog:select-directory', defaultPath)
+  selectDirectory: (defaultPath) => ipcRenderer.invoke('dialog:select-directory', defaultPath),
+
+  // Filesystem & Watcher Methods
+  readDir: (dirPath) => ipcRenderer.invoke('fs:read-dir', dirPath),
+  readFile: (filePath) => ipcRenderer.invoke('fs:read-file', filePath),
+  writeFile: (filePath, content) => ipcRenderer.invoke('fs:write-file', { filePath, content }),
+  watchFile: (filePath) => ipcRenderer.invoke('fs:watch-file', filePath),
+  unwatchFile: (filePath) => ipcRenderer.invoke('fs:unwatch-file', filePath),
+  onFileChanged: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('file-changed', handler);
+    return () => ipcRenderer.removeListener('file-changed', handler);
+  }
 });
 
 contextBridge.exposeInMainWorld('__IDE_TEST_MODE__', process.env.IDE_TEST_MODE === '1');

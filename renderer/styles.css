@@ -1236,3 +1236,271 @@ kbd {
 
 /* Compat: old footer class if referenced */
 .app-footer { display: none; }
+
+/* ==========================================================================
+   View Mode Selector & Split View Layout
+   ========================================================================== */
+.view-mode-selector {
+  display: inline-flex;
+  background: var(--vscode-input-background);
+  border-radius: 2px;
+  padding: 1px;
+  margin-right: 4px;
+}
+
+.workbench-split-wrapper {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.split-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.terminal-split-panel {
+  flex: 1;
+}
+
+.editor-split-panel {
+  flex: 1;
+  background: var(--vscode-editor-background);
+  border-left: 1px solid #1e1e1e;
+}
+
+/* Mode toggles for Split Wrapper */
+.workbench-split-wrapper.mode-terminals .terminal-split-panel { display: flex; flex: 1 !important; }
+.workbench-split-wrapper.mode-terminals .editor-split-panel { display: none !important; }
+.workbench-split-wrapper.mode-terminals .workbench-sash { display: none !important; }
+
+.workbench-split-wrapper.mode-editor .terminal-split-panel { display: none !important; }
+.workbench-split-wrapper.mode-editor .editor-split-panel { display: flex; flex: 1 !important; }
+.workbench-split-wrapper.mode-editor .workbench-sash { display: none !important; }
+
+.workbench-split-wrapper.mode-split .terminal-split-panel { display: flex; }
+.workbench-split-wrapper.mode-split .editor-split-panel { display: flex; }
+.workbench-split-wrapper.mode-split .workbench-sash { display: block; }
+
+.workbench-sash {
+  width: 5px;
+  height: 100%;
+  background: #181818;
+  cursor: col-resize;
+  z-index: 10;
+  transition: background 0.15s ease;
+}
+.workbench-sash:hover, .workbench-sash.dragging {
+  background: var(--vscode-focusBorder);
+}
+
+/* ==========================================================================
+   File Explorer Tree (Sidebar)
+   ========================================================================== */
+.icon-btn-sm {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 1px 4px;
+  font-size: 12px;
+  border-radius: 2px;
+}
+.icon-btn-sm:hover {
+  color: var(--text-main);
+  background: var(--bg-hover);
+}
+
+.file-tree-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.file-tree-root-header {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--vscode-sideBarTitle-foreground);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-tree-list {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  user-select: none;
+  padding-top: 4px;
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding-right: 8px;
+  cursor: pointer;
+  color: #cccccc;
+  white-space: nowrap;
+}
+.tree-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+.tree-item.selected {
+  background: #04395e;
+  color: #ffffff;
+}
+.tree-item.empty {
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: default;
+}
+.tree-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Code Editor Header & Tabs
+   ========================================================================== */
+.code-editor-header {
+  display: flex;
+  align-items: center;
+  height: 35px;
+  background: var(--vscode-editorGroupHeader-tabsBackground);
+  border-bottom: 1px solid #1e1e1e;
+  overflow-x: auto;
+  user-select: none;
+}
+.code-editor-tabs-scroll {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+.editor-tabs-empty {
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 10px;
+  background: #2d2d2d;
+  color: #969696;
+  border-right: 1px solid #252525;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+  position: relative;
+}
+.editor-tab:hover {
+  background: #333333;
+  color: #cccccc;
+}
+.editor-tab.active {
+  background: #1e1e1e;
+  color: #ffffff;
+  border-top: 2px solid var(--vscode-focusBorder);
+}
+
+.mode-toggle-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+.mode-toggle-pill.view {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.mode-toggle-pill.edit {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.pane-link-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pane-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.pane-link-select {
+  background: #252526;
+  color: #aaaaaa;
+  border: 1px solid #3c3c3c;
+  border-radius: 2px;
+  font-size: 10px;
+  padding: 1px 2px;
+}
+.pane-link-select:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder);
+}
+
+.editor-tab-close {
+  background: transparent;
+  border: none;
+  color: #888888;
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 2px;
+  padding: 0 4px;
+  line-height: 1;
+}
+.editor-tab-close:hover {
+  background: rgba(255,255,255,0.1);
+  color: #ffffff;
+}
+
+/* Animations for live refresh and save */
+.editor-tab.live-refreshed {
+  animation: pulse-green 1s ease;
+}
+@keyframes pulse-green {
+  0% { background: #064e3b; }
+  100% { background: #1e1e1e; }
+}
+
+.editor-tab.saved-success {
+  animation: pulse-blue 1s ease;
+}
+@keyframes pulse-blue {
+  0% { background: #1e3a8a; }
+  100% { background: #1e1e1e; }
+}
+
+.monaco-editor-container {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
