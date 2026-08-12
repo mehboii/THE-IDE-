@@ -39,7 +39,7 @@ class FileExplorer {
     if (!this.currentRootDir) {
       this.containerEl.innerHTML = `
         <div class="file-tree-empty">
-          <p>No folder opened.</p>
+          <p>No folder opened. Choose <strong>Open Folder</strong> to view real files.</p>
           <button class="btn btn-secondary btn-sm" id="btn-tree-open-folder">Open Folder</button>
         </div>
       `;

@@ -105,13 +105,9 @@ class AppController {
       await this.spawnDefaultPanes(4);
     }
 
-    // Set initial file tree root to active working directory
-    const firstPane = this.panes.get('pane-1') || this.panes.values().next().value;
-    if (firstPane && firstPane.cwd) {
-      this.fileExplorer.setRootDirectory(firstPane.cwd);
-    } else {
-      this.fileExplorer.setRootDirectory('/Volumes/LINUX MINT/vs code ');
-    }
+    // Deliberately leave the explorer empty until the user explicitly chooses
+    // Open Folder. Terminal working directories must not populate it implicitly.
+    await this.fileExplorer.render();
 
     this.updateFooter();
     this.renderEditorTabs();
@@ -351,10 +347,6 @@ class AppController {
     this.focusedPaneId = paneId;
     for (const [id, pane] of this.panes.entries()) {
       pane.setFocused(id === paneId);
-    }
-    const pane = this.panes.get(paneId);
-    if (pane && pane.cwd && this.fileExplorer) {
-      this.fileExplorer.setRootDirectory(pane.cwd);
     }
     this.updateFooter();
     this.renderEditorTabs();
