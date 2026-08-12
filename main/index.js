@@ -34,6 +34,7 @@ function openEditorFile(filePath) {
     minWidth: 700,
     minHeight: 500,
     title: 'Agent Terminal IDE — Editor',
+    icon: path.join(__dirname, '../build/icon.png'),
     backgroundColor: '#1e1e1e',
     webPreferences: {
       preload: path.join(__dirname, '../preload/editor.js'),
@@ -86,6 +87,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'Agent Terminal IDE',
+    icon: path.join(__dirname, '../build/icon.png'),
     backgroundColor: '#1e1e1e',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
