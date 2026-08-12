@@ -3,7 +3,7 @@ const ptyManager = require('./pty-manager');
 const agentConfig = require('./agent-config');
 const workspaceStore = require('./workspace-store');
 
-function registerIpcHandlers() {
+function registerIpcHandlers({ openEditorFile } = {}) {
   // PTY session handlers
   ipcMain.handle('pty:create', async (event, params) => {
     return ptyManager.createSession(params);
@@ -75,6 +75,11 @@ function registerIpcHandlers() {
 
   // Directory picker dialog handler
   ipcMain.handle('dialog:select-directory', async (event, defaultPath) => {
+    if (process.env.IDE_TEST_MODE === '1' && global.__TEST_DIRECTORY_PATH__) {
+      const selected = global.__TEST_DIRECTORY_PATH__;
+      global.__TEST_DIRECTORY_PATH__ = null;
+      return selected;
+    }
     const window = event.sender.getOwnerBrowserWindow();
     const result = await dialog.showOpenDialog(window, {
       title: 'Select Working Directory',
@@ -90,6 +95,17 @@ function registerIpcHandlers() {
 
   ipcMain.handle('test:set-save-as-path', (event, targetPath) => {
     global.__TEST_SAVE_AS_PATH__ = targetPath;
+    return true;
+  });
+  ipcMain.handle('test:set-directory-path', (event, targetPath) => {
+    global.__TEST_DIRECTORY_PATH__ = targetPath;
+    return true;
+  });
+
+  // The main renderer requests editor files through this channel. It never
+  // mounts Monaco itself; the file is delivered to the editor BrowserWindow.
+  ipcMain.handle('editor:open-file', (event, filePath) => {
+    if (typeof openEditorFile === 'function') openEditorFile(filePath);
     return true;
   });
 
@@ -115,6 +131,16 @@ function registerIpcHandlers() {
   const fs = require('fs');
   const path = require('path');
   const fileWatchers = new Map();
+  const watcherKey = (sender, filePath) => `${sender.id}:${filePath}`;
+  const closeSenderWatchers = (sender) => {
+    const prefix = `${sender.id}:`;
+    for (const [key, watcher] of fileWatchers) {
+      if (key.startsWith(prefix)) {
+        try { watcher.close(); } catch (_) {}
+        fileWatchers.delete(key);
+      }
+    }
+  };
 
   ipcMain.handle('fs:read-dir', async (event, dirPath) => {
     try {
@@ -159,7 +185,8 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('fs:watch-file', (event, filePath) => {
-    if (!filePath || fileWatchers.has(filePath)) return true;
+    const key = watcherKey(event.sender, filePath);
+    if (!filePath || fileWatchers.has(key)) return true;
     try {
       let debounceTimer = null;
       const watcher = fs.watch(filePath, (eventType) => {
@@ -171,7 +198,8 @@ function registerIpcHandlers() {
           }
         }, 150);
       });
-      fileWatchers.set(filePath, watcher);
+      fileWatchers.set(key, watcher);
+      event.sender.once('destroyed', () => closeSenderWatchers(event.sender));
       return true;
     } catch (err) {
       console.error('fs:watch-file error:', err);
@@ -180,11 +208,12 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('fs:unwatch-file', (event, filePath) => {
-    if (fileWatchers.has(filePath)) {
+    const key = watcherKey(event.sender, filePath);
+    if (fileWatchers.has(key)) {
       try {
-        fileWatchers.get(filePath).close();
+        fileWatchers.get(key).close();
       } catch (_) {}
-      fileWatchers.delete(filePath);
+      fileWatchers.delete(key);
     }
     return true;
   });

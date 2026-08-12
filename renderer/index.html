@@ -117,12 +117,6 @@
         <!-- Toolbar (secondary, like editor actions) -->
         <div class="editor-toolbar" id="editor-toolbar">
           <div class="toolbar-left">
-            <!-- View Mode Switcher -->
-            <div class="view-mode-selector" role="group" aria-label="View mode">
-              <button id="btn-view-terminals" class="btn-tab active" type="button" title="Terminals Only">Terminals</button>
-              <button id="btn-view-split" class="btn-tab" type="button" title="Split View (Terminals + Editor)">Split</button>
-              <button id="btn-view-editor" class="btn-tab" type="button" title="Code Editor Only">Editor</button>
-            </div>
             <div class="grid-preset-selector" role="group" aria-label="Grid layout">
               <button id="btn-preset-2x3" class="btn-tab active" type="button" title="2 Rows × 3 Columns">2×3</button>
               <button id="btn-preset-3x2" class="btn-tab" type="button" title="3 Rows × 2 Columns">3×2</button>
@@ -153,36 +147,13 @@
           <button id="banner-close" class="banner-close" type="button" aria-label="Dismiss">×</button>
         </div>
 
-        <!-- Split Content Area -->
-        <div class="workbench-split-wrapper mode-terminals" id="workbench-split-wrapper">
-          <!-- Terminal View Container -->
-          <div class="split-panel terminal-split-panel" id="terminal-split-panel">
-            <!-- Editor tabs (one per pane, VS Code style) -->
-            <div class="editor-tabs" id="editor-tabs" role="tablist">
-              <div class="editor-tabs-scroll" id="editor-tabs-scroll">
-                <!-- Tabs populated dynamically -->
-              </div>
-              <button id="btn-tab-add" class="editor-tab-add" type="button" title="New Pane" aria-label="Add pane">+</button>
-            </div>
-
-            <!-- Terminal grid -->
-            <main id="grid-container" class="grid-container grid-layout-2x3" aria-label="Terminal grid">
-              <!-- Panes + dividers injected by grid.js -->
-            </main>
+        <!-- The main window is terminal-only. File clicks open the separate editor BrowserWindow. -->
+        <div class="terminal-workbench">
+          <div class="editor-tabs" id="editor-tabs" role="tablist">
+            <div class="editor-tabs-scroll" id="editor-tabs-scroll"></div>
+            <button id="btn-tab-add" class="editor-tab-add" type="button" title="New Pane" aria-label="Add pane">+</button>
           </div>
-
-          <!-- Resizable Divider Sash for Split Mode -->
-          <div class="workbench-sash" id="workbench-sash" title="Drag to resize split view"></div>
-
-          <!-- Code Editor View Container -->
-          <div class="split-panel editor-split-panel" id="editor-split-panel">
-            <div class="code-editor-header" id="code-editor-header">
-              <div class="code-editor-tabs-scroll" id="code-editor-tabs">
-                <!-- Code Editor File Tabs -->
-              </div>
-            </div>
-            <div class="monaco-editor-container" id="monaco-editor-container"></div>
-          </div>
+          <main id="grid-container" class="grid-container grid-layout-2x3" aria-label="Terminal grid"></main>
         </div>
       </section>
     </div>
@@ -291,18 +262,15 @@
     </div>
   </div>
 
-  <!-- Hidden refs kept for API compatibility with tests -->
   <button id="btn-tab-close" class="hidden" type="button" aria-hidden="true"></button>
 
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
-  <script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
   <script src="pane.js"></script>
   <script src="grid.js"></script>
   <script src="broadcast.js"></script>
   <script src="file-explorer.js"></script>
-  <script src="code-editor.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -9,7 +9,8 @@
     "postinstall": "npx @electron/rebuild -v 31.2.0",
     "dist": "electron-builder --linux",
     "dist:mac": "electron-builder --mac",
-    "test:smoke": "node test/smoke.js"
+    "test:smoke": "node test/smoke.js",
+    "test:editor-window": "node test/verify_editor_window.js"
   },
   "keywords": [
     "electron",

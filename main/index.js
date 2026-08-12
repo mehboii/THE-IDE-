@@ -4,6 +4,80 @@ const ptyManager = require('./pty-manager');
 const { registerIpcHandlers } = require('./ipc-handlers');
 
 let mainWindow = null;
+let editorWindow = null;
+let pendingEditorFiles = [];
+let editorReady = false;
+
+function sendFileToEditor(filePath) {
+  if (!editorWindow || editorWindow.isDestroyed()) return;
+  editorWindow.webContents.send('editor:open-file', filePath);
+}
+
+function openEditorFile(filePath) {
+  if (!filePath) return;
+  if (editorWindow && !editorWindow.isDestroyed()) {
+    if (!editorReady) {
+      pendingEditorFiles.push(filePath);
+      return;
+    }
+    editorWindow.show();
+    editorWindow.focus();
+    sendFileToEditor(filePath);
+    return;
+  }
+
+  pendingEditorFiles.push(filePath);
+  editorReady = false;
+  editorWindow = new BrowserWindow({
+    width: 1100,
+    height: 800,
+    minWidth: 700,
+    minHeight: 500,
+    title: 'Agent Terminal IDE — Editor',
+    backgroundColor: '#1e1e1e',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/editor.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+  editorWindow.setMenu(createEditorMenu());
+  editorWindow.loadFile(path.join(__dirname, '../renderer/editor.html'));
+  editorWindow.webContents.once('did-finish-load', () => {
+    editorReady = true;
+    const files = pendingEditorFiles;
+    pendingEditorFiles = [];
+    files.forEach(sendFileToEditor);
+  });
+  editorWindow.on('closed', () => {
+    editorWindow = null;
+    editorReady = false;
+    pendingEditorFiles = [];
+  });
+}
+
+function callEditor(method) {
+  if (editorWindow && !editorWindow.isDestroyed()) {
+    editorWindow.webContents.executeJavaScript(`window.editorApp && window.editorApp.${method}()`);
+  }
+}
+
+function createEditorMenu() {
+  return Menu.buildFromTemplate([
+    {
+      label: 'File',
+      submenu: [
+        { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => callEditor('openFolder') },
+        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => callEditor('save') },
+        { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => callEditor('saveAs') },
+        { type: 'separator' },
+        { role: 'close' }
+      ]
+    },
+    { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] }
+  ]);
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -24,7 +98,9 @@ function createWindow() {
   ptyManager.setWindow(mainWindow);
 
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-  if (process.env.IDE_TEST_MODE) mainWindow.webContents.openDevTools({ mode: 'detach' });
+  // Keep automated window counts meaningful; opt in to a detached inspector
+  // separately when diagnosing a test run.
+  if (process.env.IDE_TEST_DEVTOOLS) mainWindow.webContents.openDevTools({ mode: 'detach' });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -145,7 +221,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  registerIpcHandlers();
+  registerIpcHandlers({ openEditorFile });
   createWindow();
 
   app.on('activate', () => {

@@ -1,11 +1,10 @@
 class CodeEditorManager {
-  constructor(containerEl, tabsContainerEl, paneGetterFn) {
+  constructor(containerEl, tabsContainerEl) {
     this.containerEl = containerEl;
     this.tabsContainerEl = tabsContainerEl;
-    this.getPanesListFn = paneGetterFn; // Function that returns array of active panes
     this.editor = null;
     this.monacoReady = false;
-    this.openTabs = new Map(); // filePath -> { filePath, content, mode: 'view'|'edit', linkedPaneId: string|null, model: monaco.editor.ITextModel }
+    this.openTabs = new Map(); // filePath -> { filePath, content, mode: 'view'|'edit', model }
     this.activeFilePath = null;
     this.fileChangeUnsubscribe = null;
 
@@ -111,7 +110,7 @@ class CodeEditorManager {
     }
   }
 
-  async openFile(filePath, mode = 'view', linkedPaneId = null) {
+  async openFile(filePath, mode = 'view') {
     if (this.openTabs.has(filePath)) {
       this.switchTab(filePath);
       return;
@@ -136,7 +135,6 @@ class CodeEditorManager {
       name: filePath.split(/[/\\]/).pop(),
       content: res.content,
       mode,
-      linkedPaneId,
       model,
       language
     };
@@ -200,14 +198,6 @@ class CodeEditorManager {
     this.renderTabs();
   }
 
-  setLinkedPane(filePath, paneId) {
-    const tabData = this.openTabs.get(filePath);
-    if (!tabData) return;
-
-    tabData.linkedPaneId = paneId || null;
-    this.renderTabs();
-  }
-
   async saveActiveFile() {
     if (!this.activeFilePath) return;
     const tabData = this.openTabs.get(this.activeFilePath);
@@ -235,9 +225,8 @@ class CodeEditorManager {
     const res = await window.electronAPI.writeFile(newPath, currentContent);
     if (res.success) {
       const oldPath = this.activeFilePath;
-      const linkedPaneId = tabData.linkedPaneId;
       this.closeTab(oldPath);
-      await this.openFile(newPath, 'edit', linkedPaneId);
+      await this.openFile(newPath, 'edit');
       this.showSaveSuccessIndicator(newPath);
     } else {
       alert(`Failed to Save As: ${res.error}`);
@@ -261,41 +250,23 @@ class CodeEditorManager {
       return;
     }
 
-    const panes = this.getPanesListFn ? this.getPanesListFn() : [];
-
     for (const [filePath, tabData] of this.openTabs.entries()) {
       const isActive = filePath === this.activeFilePath;
       const tabEl = document.createElement('div');
       tabEl.className = `editor-tab ${isActive ? 'active' : ''}`;
       tabEl.setAttribute('data-filepath', filePath);
 
-      // Find linked pane info
-      const linkedPane = panes.find(p => p.id === tabData.linkedPaneId);
-      const dotColor = linkedPane ? (linkedPane.status === 'exited' ? '#f43f5e' : '#10b981') : 'transparent';
-
       tabEl.innerHTML = `
         <span class="editor-tab-title" title="${filePath}">${tabData.name}</span>
-        
-        <!-- Mode toggle pill -->
         <button class="mode-toggle-pill ${tabData.mode}" type="button" title="Click to toggle View/Edit mode">
           ${tabData.mode === 'view' ? '👁 View' : '✏️ Edit'}
         </button>
-
-        <!-- Pane tracking dropdown -->
-        <div class="pane-link-wrapper" title="Link tab to terminal pane">
-          <span class="pane-dot" style="background-color: ${dotColor}; display: ${linkedPane ? 'inline-block' : 'none'}"></span>
-          <select class="pane-link-select">
-            <option value="">Watching: None</option>
-            ${panes.map(p => `<option value="${p.id}" ${p.id === tabData.linkedPaneId ? 'selected' : ''}>Watching: ${p.title || p.id}</option>`).join('')}
-          </select>
-        </div>
-
         <button class="editor-tab-close" type="button" title="Close tab">×</button>
       `;
 
       // Event listeners
       tabEl.addEventListener('click', (e) => {
-        if (!e.target.closest('.mode-toggle-pill') && !e.target.closest('.pane-link-select') && !e.target.closest('.editor-tab-close')) {
+        if (!e.target.closest('.mode-toggle-pill') && !e.target.closest('.editor-tab-close')) {
           this.switchTab(filePath);
         }
       });
@@ -304,12 +275,6 @@ class CodeEditorManager {
       modeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleMode(filePath);
-      });
-
-      const selectEl = tabEl.querySelector('.pane-link-select');
-      selectEl.addEventListener('change', (e) => {
-        e.stopPropagation();
-        this.setLinkedPane(filePath, e.target.value);
       });
 
       const closeBtn = tabEl.querySelector('.editor-tab-close');

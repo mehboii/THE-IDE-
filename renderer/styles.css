@@ -1257,6 +1257,14 @@ kbd {
   position: relative;
 }
 
+.terminal-workbench {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .split-panel {
   display: flex;
   flex-direction: column;
