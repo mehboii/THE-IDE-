@@ -22,7 +22,7 @@
 
 ---
 
-##  Prerequisites & Installation
+##  Prerequisites & Installation.
 
 ### 1. Prerequisites
 - **Node.js**: Version 18 or 20+
