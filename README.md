@@ -33,7 +33,7 @@
   - **Linux**: `sudo apt install -y build-essential python3`
   - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
 
-### macOS quick start
+### macOS quick start.
 
 Install Homebrew first if it is not already present, then install the two system requirements:
 
@@ -47,7 +47,7 @@ npm start
 
 On Apple Silicon, run the install and build using the same architecture that will run the application (normally native `arm64` Terminal). Do not copy a `node_modules` directory built on an Intel Mac to Apple Silicon, or vice versa: rerun `npm install` and `npm run rebuild` instead.
 
-### 2. Installation
+### 2. Installation.
 ```bash
 # Clone the repository and navigate into directory
 git clone https://github.com/your-org/agent-terminal-ide.git
@@ -66,7 +66,7 @@ npm run rebuild
 
 ---
 
-##  Running the App
+##  Running the App.
 
 ```bash
 # Start Electron application locally
@@ -80,7 +80,7 @@ npm run rebuild
 
 ---
 
-##  How tmux Session Persistence Works
+##  How tmux Session Persistence Works.
 
 Unlike standard terminal emulators that terminate shell processes when closed, **Agent Terminal IDE** leverages `tmux` as an IPC session daemon under the hood:
 
@@ -95,7 +95,7 @@ Unlike standard terminal emulators that terminate shell processes when closed, *
 
 ---
 
-##  Adding Custom CLI Agent Presets
+##  Adding Custom CLI Agent Presets.
 
 Preset options are configured via JSON and loaded dynamically. You can add new CLI agent tools (e.g. custom Python scripts, GPT-Engineer, or Aider variants) without editing application code.
 
@@ -128,7 +128,7 @@ Agent presets can also be saved in your user data directory (`<userData>/user_ag
 
 ---
 
-##  Keyboard Shortcuts Reference
+##  Keyboard Shortcuts Reference.
 
 | Shortcut | Action |
 | :--- | :--- |
@@ -141,7 +141,7 @@ Agent presets can also be saved in your user data directory (`<userData>/user_ag
 
 ---
 
-##  Building & Packaging for Linux
+##  Building & Packaging for Linux.
 
 The project is pre-configured with `electron-builder` to package Linux distribution targets (**AppImage** and **.deb**).
 
@@ -164,7 +164,7 @@ This creates a `.dmg` and `.zip` in `dist/`. Local unsigned builds may trigger G
 
 ---
 
-##  End-to-end smoke test
+##  End-to-end smoke test.
 
 The smoke suite launches Electron through Playwright, verifies the initial four-pane grid, writes `echo hello-sandbox-test` through the real `node-pty` bridge, verifies that killing a pane kills its `ide-*` tmux session, then restarts Electron and reattaches a surviving session.
 
@@ -183,7 +183,7 @@ The test requires a functioning Electron binary, `tmux`, and Xvfb. It cleans up 
 
 ---
 
-## 📁 Project Structure
+##  Project Structure.
 
 ```
 .
