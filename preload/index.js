@@ -30,6 +30,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAgents: () => ipcRenderer.invoke('agents:list'),
   saveAgents: (agentsList) => ipcRenderer.invoke('agents:save', agentsList),
 
+  // Custom remote model configuration and streaming chat (main-process only)
+  getCustomModels: () => ipcRenderer.invoke('custom-models:list'),
+  saveCustomModels: (models) => ipcRenderer.invoke('custom-models:save', models),
+  testCustomModel: (model) => ipcRenderer.invoke('custom-models:test', model),
+  sendCustomModelChat: (payload) => ipcRenderer.invoke('custom-models:chat', payload),
+  onCustomModelToken: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:token', h); return () => ipcRenderer.removeListener('custom-model:token', h); },
+  onCustomModelDone: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:done', h); return () => ipcRenderer.removeListener('custom-model:done', h); },
+  onCustomModelError: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:error', h); return () => ipcRenderer.removeListener('custom-model:error', h); },
+
   // Workspace Storage Methods
   getWorkspaces: () => ipcRenderer.invoke('workspaces:get-all'),
   saveWorkspace: (name, layout) => ipcRenderer.invoke('workspaces:save', { name, layout }),

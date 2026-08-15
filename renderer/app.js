@@ -3,6 +3,7 @@ class AppController {
     this.gridManager = null;
     this.panes = new Map();
     this.agentsList = [];
+    this.customModels = [];
     this.workspaces = {};
     this.activeWorkspaceName = null;
     this.focusedPaneId = null;
@@ -40,6 +41,13 @@ class AppController {
     this.sidebarSessionsList = document.getElementById('sidebar-sessions-list');
     this.sidebarWorkspacesList = document.getElementById('sidebar-workspaces-list');
     this.sidebarAgentsList = document.getElementById('sidebar-agents-list');
+    this.sidebarCustomModelsList = document.getElementById('sidebar-custom-models-list');
+    this.sidebarCustomModelCount = document.getElementById('sidebar-custom-model-count');
+    this.btnAddCustomModel = document.getElementById('btn-add-custom-model');
+    this.modalCustomModel = document.getElementById('modal-custom-model');
+    this.customModelForm = document.getElementById('custom-model-form');
+    this.customModelTestResult = document.getElementById('custom-model-test-result');
+    this._editingCustomModelId = null;
     this.editorTabsScroll = document.getElementById('editor-tabs-scroll');
     this.titlebarTitle = document.getElementById('titlebar-title');
     this.appShell = document.getElementById('app-shell');
@@ -79,8 +87,10 @@ class AppController {
     await this.checkTmux();
 
     this.agentsList = await window.electronAPI.getAgents();
+    this.customModels = await window.electronAPI.getCustomModels();
     await this.loadWorkspaceOptions();
     this.renderSidebarAgents();
+    this.renderCustomModels();
 
     this.attachEventListeners();
     this.setupKeyboardShortcuts();
@@ -133,6 +143,9 @@ class AppController {
         this.renderSidebarSessions();
       }
     });
+    window.electronAPI.onCustomModelToken(({ paneId, token }) => this.panes.get(paneId)?.receiveToken?.(token));
+    window.electronAPI.onCustomModelDone(({ paneId }) => this.panes.get(paneId)?.receiveDone?.());
+    window.electronAPI.onCustomModelError(({ paneId, error }) => this.panes.get(paneId)?.disconnect?.(error));
   }
 
   async checkTmux() {
@@ -168,7 +181,7 @@ class AppController {
     return this.panes.size + this._pendingCreates;
   }
 
-  async createPane({ id, label, cwd, agentId, customSessionName } = {}) {
+  async createPane({ id, label, cwd, agentId, customSessionName, customModel } = {}) {
     if (this.effectivePaneCount() >= 6) {
       this.showBanner('Maximum 6 terminal panes supported simultaneously.');
       return null;
@@ -184,6 +197,7 @@ class AppController {
         return this.panes.get(paneId);
       }
 
+      if (customModel) return this.createCustomModelPane({ id: paneId, label, customModel });
       const agentObj = this.agentsList.find((a) => a.id === agentId) || this.agentsList.find((a) => a.id === 'shell') || this.agentsList[0];
       const initialCwd = cwd || '';
 
@@ -249,6 +263,16 @@ class AppController {
     }
   }
 
+  async createCustomModelPane({ id, label, customModel }) {
+    const pane = new CustomModelPane({ id, label: label || customModel.name, model: customModel,
+      onFocus: (pId) => this.focusPane(pId), onClose: (pId) => this.removePane(pId),
+      onRestart: (pId) => this.restartPane(pId), onKill: (pId) => this.killPaneSession(pId),
+      onLabelChange: () => { this.renderEditorTabs(); this.renderSidebarSessions(); },
+      onStatusChange: () => { this.renderEditorTabs(); this.renderSidebarSessions(); } });
+    await pane.init(); this.panes.set(id, pane); this.gridManager.addPaneToGrid(pane); this.focusPane(id);
+    this.updateFooter(); this.renderEditorTabs(); this.renderSidebarSessions(); return pane;
+  }
+
   async removePane(paneId) {
     const pane = this.panes.get(paneId);
     if (!pane) return;
@@ -256,9 +280,9 @@ class AppController {
     // Guard: remove from map first to prevent double-calls on rapid clicks
     this.panes.delete(paneId);
 
-    // Detach PTY without killing tmux (persistence)
+    // A remote chat has no PTY; terminal panes preserve existing detach behavior.
     try {
-      await window.electronAPI.destroyPty(paneId, false);
+      if (!(pane instanceof CustomModelPane)) await window.electronAPI.destroyPty(paneId, false);
     } catch (err) {
       console.warn('destroyPty failed', err);
     }
@@ -283,6 +307,7 @@ class AppController {
     const pane = this.panes.get(paneId);
     if (!pane) return;
 
+    if (pane instanceof CustomModelPane) { pane.clearTerminal(); await pane.reconnect(); return; }
     const agentObj = this.agentsList.find((a) => a.id === pane.agentId);
     const dims = pane.getDimensions();
 
@@ -319,6 +344,7 @@ class AppController {
     const ok = window.__IDE_TEST_MODE__ || confirm(`Kill persistent tmux session for ${pane.label}?`);
     if (!ok) return;
 
+    if (pane instanceof CustomModelPane) { pane.disconnect('Stopped by user. Use Reconnect to continue.'); return; }
     try {
       await window.electronAPI.destroyPty(paneId, true);
       pane.setStatus('exited');
@@ -455,7 +481,8 @@ class AppController {
         id: pane.id,
         label: pane.label,
         cwd: pane.cwd,
-        agentId: pane.agentId
+        agentId: pane.agentId,
+        customModelId: pane instanceof CustomModelPane ? pane.model.id : null
       });
     }
 
@@ -499,7 +526,8 @@ class AppController {
           id: pConf.id,
           label: pConf.label,
           cwd: pConf.cwd,
-          agentId: pConf.agentId
+          agentId: pConf.agentId,
+          customModel: pConf.customModelId ? this.customModels.find((m) => m.id === pConf.customModelId) : null
         });
       }
     }
@@ -627,6 +655,29 @@ class AppController {
     });
   }
 
+  renderCustomModels() {
+    if (!this.sidebarCustomModelsList) return;
+    this.sidebarCustomModelsList.innerHTML = '';
+    if (this.sidebarCustomModelCount) this.sidebarCustomModelCount.textContent = this.customModels.length;
+    if (!this.customModels.length) { this.sidebarCustomModelsList.innerHTML = '<div class="tree-empty">No remote endpoints configured</div>'; return; }
+    this.customModels.forEach((model) => {
+      const row = document.createElement('button'); row.type = 'button'; row.className = 'tree-item agent-item';
+      row.innerHTML = `<span class="tree-label">${this.escapeHtml(model.name)}</span><span class="tree-meta">${this.escapeHtml(model.type === 'ollama' ? 'Ollama' : 'OpenAI')}</span>`;
+      row.addEventListener('click', () => this.openCustomModelModal(model)); this.sidebarCustomModelsList.appendChild(row);
+    });
+  }
+
+  openCustomModelModal(model = null) {
+    this._editingCustomModelId = model?.id || null; this.customModelForm.reset(); this.customModelTestResult.textContent = '';
+    ['name', 'host', 'port', 'type', 'model', 'apiKey'].forEach((key) => { if (model?.[key] != null) this.customModelForm.elements[key].value = model[key]; });
+    document.getElementById('custom-model-title').textContent = model ? 'Edit Custom Model' : 'Add Custom Model';
+    document.getElementById('btn-delete-custom-model').classList.toggle('hidden', !model); this.modalCustomModel.classList.remove('hidden');
+  }
+  closeCustomModelModal() { this.modalCustomModel.classList.add('hidden'); }
+  customModelFromForm() { const data = Object.fromEntries(new FormData(this.customModelForm)); return { id: this._editingCustomModelId || `custom-${Date.now()}`, ...data, port: String(data.port).trim() }; }
+  async saveCustomModel() { if (!this.customModelForm.reportValidity()) return; const model = this.customModelFromForm(); const i = this.customModels.findIndex((m) => m.id === model.id); if (i >= 0) this.customModels[i] = model; else this.customModels.push(model); this.customModels = await window.electronAPI.saveCustomModels(this.customModels); this.renderCustomModels(); this.closeCustomModelModal(); }
+  async testCustomModel() { if (!this.customModelForm.reportValidity()) return; const r = await window.electronAPI.testCustomModel(this.customModelFromForm()); this.customModelTestResult.className = `custom-model-test-result ${r.success ? 'success' : 'error'}`; this.customModelTestResult.textContent = r.success ? `Connected: ${r.message}` : `Connection failed: ${r.error}`; }
+
   openRunAgentModal({ targetPaneId, selectedAgentId }) {
     if (!this.modalRunAgent) return;
     this._runAgentTargetPaneId = targetPaneId || (this.focusedPaneId || Array.from(this.panes.keys())[0]);
@@ -638,11 +689,13 @@ class AppController {
       if (agent.id === selectedAgentId) opt.selected = true;
       this.runAgentSelect.appendChild(opt);
     });
+    this.customModels.forEach((model) => { const opt = document.createElement('option'); opt.value = `custom:${model.id}`; opt.textContent = `${model.name} (remote)`; this.runAgentSelect.appendChild(opt); });
 
     const updateDesc = () => {
       const selected = this.agentsList.find((a) => a.id === this.runAgentSelect.value);
+      const custom = this.customModels.find((m) => `custom:${m.id}` === this.runAgentSelect.value);
       if (this.runAgentDesc) {
-        this.runAgentDesc.textContent = selected ? (selected.description || selected.command || selected.name) : '';
+        this.runAgentDesc.textContent = custom ? `${custom.type === 'ollama' ? 'Ollama' : 'OpenAI-compatible'} endpoint at ${custom.host}:${custom.port}` : (selected ? (selected.description || selected.command || selected.name) : '');
       }
     };
     this.runAgentSelect.onchange = updateDesc;
@@ -656,6 +709,19 @@ class AppController {
   }
 
   executeAgent({ targetPaneId, agentId, scope }) {
+    if (agentId.startsWith('custom:')) {
+      const model = this.customModels.find((m) => m.id === agentId.slice(7));
+      if (!model) return this.showBanner('That custom model no longer exists.', 'error');
+      const targets = scope === 'all' ? Array.from(this.panes.keys()) : [targetPaneId];
+      (async () => {
+        for (const paneId of targets) {
+          const old = this.panes.get(paneId); if (!old) continue;
+          await this.removePane(paneId);
+          await this.createPane({ id: paneId, label: scope === 'all' ? `${model.name}` : model.name, customModel: model });
+        }
+      })();
+      return;
+    }
     const agentObj = this.agentsList.find((a) => a.id === agentId);
     if (!agentObj) return;
 
@@ -970,6 +1036,14 @@ class AppController {
     this.btnDeleteWorkspace.addEventListener('click', () => this.deleteSelectedWorkspace());
     this.workspaceSelect.addEventListener('change', (e) => this.loadSelectedWorkspace(e.target.value));
     this.bannerClose.addEventListener('click', () => this.hideBanner());
+    this.btnAddCustomModel?.addEventListener('click', () => this.openCustomModelModal());
+    document.getElementById('modal-custom-model-close')?.addEventListener('click', () => this.closeCustomModelModal());
+    document.getElementById('btn-save-custom-model')?.addEventListener('click', () => this.saveCustomModel());
+    document.getElementById('btn-test-custom-model')?.addEventListener('click', () => this.testCustomModel());
+    document.getElementById('btn-delete-custom-model')?.addEventListener('click', async () => {
+      this.customModels = this.customModels.filter((m) => m.id !== this._editingCustomModelId);
+      this.customModels = await window.electronAPI.saveCustomModels(this.customModels); this.renderCustomModels(); this.closeCustomModelModal();
+    });
 
     this.btnHelp.addEventListener('click', () => this.modalHelp.classList.remove('hidden'));
     this.modalHelpClose.addEventListener('click', () => this.modalHelp.classList.add('hidden'));

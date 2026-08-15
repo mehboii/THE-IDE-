@@ -108,6 +108,11 @@
               <!-- Populated dynamically -->
             </div>
           </div>
+          <div class="sidebar-section" data-section="custom-models">
+            <button class="sidebar-section-header" type="button" data-toggle-section="custom-models"><span class="codicon-chevron expanded">▶</span><span>Custom Models</span><span class="section-badge" id="sidebar-custom-model-count">0</span></button>
+            <div class="sidebar-section-content" id="sidebar-custom-models-list"></div>
+            <button id="btn-add-custom-model" class="tree-item" type="button">+ Add custom endpoint</button>
+          </div>
         </div>
       </aside>
       <div class="sidebar-sash" id="sidebar-sash" title="Drag to resize"></div>
@@ -245,7 +250,7 @@
         <button class="modal-close" id="modal-run-agent-close" type="button" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
-        <p>Select an AI agent preset to launch in your terminal shell:</p>
+        <p>Select a CLI agent or remote custom model:</p>
         <div class="form-group">
           <label for="run-agent-select" class="form-label">Agent Preset:</label>
           <select id="run-agent-select" class="select-input modal-select">
@@ -262,12 +267,23 @@
     </div>
   </div>
 
+  <div id="modal-custom-model" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="Custom Model Configuration">
+    <div class="modal-box"><div class="modal-header"><h3 id="custom-model-title">Custom Model</h3><button class="modal-close" id="modal-custom-model-close" type="button">×</button></div>
+      <form id="custom-model-form" class="modal-body custom-model-form">
+        <label>Display name <input name="name" class="text-input" required></label><label>Host / IP <input name="host" class="text-input" placeholder="192.168.1.20" required></label><label>Port <input name="port" class="text-input" placeholder="11434" required></label>
+        <label>Protocol <select name="type" class="select-input"><option value="ollama">Ollama API</option><option value="openai">OpenAI-Compatible API</option></select></label><label>Model name / tag <input name="model" class="text-input" placeholder="llama3:70b" required></label><label>API key (optional) <input name="apiKey" class="text-input" type="password"></label>
+        <div id="custom-model-test-result" class="custom-model-test-result"></div>
+      </form><div class="modal-footer"><button id="btn-delete-custom-model" class="btn btn-danger" type="button">Delete</button><button id="btn-test-custom-model" class="btn btn-secondary" type="button">Test Connection</button><button id="btn-save-custom-model" class="btn btn-primary" type="button">Save</button></div>
+    </div>
+  </div>
+
   <button id="btn-tab-close" class="hidden" type="button" aria-hidden="true"></button>
 
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
   <script src="pane.js"></script>
+  <script src="chat-pane.js"></script>
   <script src="grid.js"></script>
   <script src="broadcast.js"></script>
   <script src="file-explorer.js"></script>

@@ -453,6 +453,7 @@ kbd {
 .tree-dot.idle { background: var(--color-warning); }
 .tree-dot.exited { background: var(--color-danger); }
 .tree-dot.detached { background: #6a6a6a; }
+.tree-dot.disconnected { background: var(--color-danger); }
 .tree-empty {
   padding: 4px 8px 8px 22px;
   color: #8c8c8c;
@@ -464,6 +465,11 @@ kbd {
   font-size: 11px;
   color: #8c8c8c;
 }
+.custom-model-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.custom-model-form label { display: grid; gap: 4px; color: var(--text-muted); font-size: 12px; }
+.custom-model-form .text-input, .custom-model-form .select-input { max-width: none; width: 100%; }
+.custom-model-test-result { grid-column: 1 / -1; min-height: 18px; color: var(--text-muted); }
+.custom-model-test-result.success { color: var(--color-success); }.custom-model-test-result.error { color: var(--color-danger); }
 
 /* Side bar resize sash */
 .sidebar-sash {
@@ -634,6 +640,15 @@ kbd {
   opacity: 0.8;
 }
 .banner-close:hover { opacity: 1; }
+
+/* Remote model pane: it intentionally shares the grid chrome with terminals. */
+.custom-model-badge { color: #9cdcfe; font-size: 11px; padding: 1px 5px; border: 1px solid #397a9e; border-radius: 8px; }
+.chat-body { min-height: 0; flex: 1; display: flex; flex-direction: column; background: #1e1e1e; }
+.chat-messages { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; user-select: text; }
+.chat-message { max-width: 88%; white-space: pre-wrap; padding: 8px 10px; border-radius: 5px; line-height: 1.45; }
+.chat-message.user { align-self: flex-end; background: #094771; color: white; }.chat-message.assistant { align-self: flex-start; background: #2d2d2d; color: var(--text-main); }
+.chat-composer { display: flex; gap: 8px; padding: 8px; border-top: 1px solid var(--border-color); }.chat-composer textarea { flex: 1; resize: none; padding: 6px; background: var(--vscode-input-background); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 2px; }
+.chat-disconnected { position: absolute; left: 18px; right: 18px; bottom: 58px; z-index: 3; padding: 10px; background: #5a1d1d; border: 1px solid #9c3838; color: #f48771; display: flex; gap: 8px; align-items: center; }
 
 /* =============================================================================
    Editor tabs (VS Code style)
@@ -882,6 +897,8 @@ kbd {
 .status-idle { background: var(--color-warning); }
 .status-exited { background: var(--color-danger); }
 .status-detached { background: #6a6a6a; }
+.status-busy { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning); }
+.status-disconnected { background: var(--color-danger); box-shadow: 0 0 5px var(--color-danger); }
 
 .pane-label-input {
   background: transparent;

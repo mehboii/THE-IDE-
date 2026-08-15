@@ -10,6 +10,7 @@
     "dist": "electron-builder --linux",
     "dist:mac": "electron-builder --mac",
     "test:smoke": "node test/smoke.js",
+    "test:custom-models": "node test/verify-custom-models.js",
     "test:editor-window": "node test/verify_editor_window.js"
   },
   "keywords": [
@@ -30,6 +31,7 @@
     "@xterm/addon-search": "^0.15.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
+    "electron-store": "^8.2.0",
     "monaco-editor": "^0.56.0",
     "node-pty": "^1.0.0"
   },
