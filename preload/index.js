@@ -35,9 +35,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveCustomModels: (models) => ipcRenderer.invoke('custom-models:save', models),
   testCustomModel: (model) => ipcRenderer.invoke('custom-models:test', model),
   sendCustomModelChat: (payload) => ipcRenderer.invoke('custom-models:chat', payload),
+  decideCustomModelTool: (callId, approved) => ipcRenderer.invoke('custom-models:tool-decision', { callId, approved }),
   onCustomModelToken: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:token', h); return () => ipcRenderer.removeListener('custom-model:token', h); },
   onCustomModelDone: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:done', h); return () => ipcRenderer.removeListener('custom-model:done', h); },
   onCustomModelError: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:error', h); return () => ipcRenderer.removeListener('custom-model:error', h); },
+  onCustomModelToolCall: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:tool-call', h); return () => ipcRenderer.removeListener('custom-model:tool-call', h); },
+  onCustomModelToolResult: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:tool-result', h); return () => ipcRenderer.removeListener('custom-model:tool-result', h); },
+  onCustomModelMaxIterations: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:max-iterations', h); return () => ipcRenderer.removeListener('custom-model:max-iterations', h); },
   readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
   writeClipboardText: (text) => ipcRenderer.invoke('clipboard:write-text', text),
 
