@@ -1,4 +1,4 @@
-const { ipcMain, dialog } = require('electron');
+const { ipcMain, dialog, clipboard } = require('electron');
 const ptyManager = require('./pty-manager');
 const agentConfig = require('./agent-config');
 const workspaceStore = require('./workspace-store');
@@ -65,6 +65,14 @@ function registerIpcHandlers({ openEditorFile } = {}) {
   ipcMain.handle('custom-models:test', (event, model) => customModelService.testConnection(model));
   ipcMain.handle('custom-models:chat', (event, { paneId, model, messages }) =>
     customModelService.streamChat(event.sender, paneId, model, messages));
+
+  // Keep terminal clipboard access inside Electron rather than relying on the
+  // renderer having browser clipboard permissions.
+  ipcMain.handle('clipboard:read-text', () => clipboard.readText());
+  ipcMain.handle('clipboard:write-text', (event, text) => {
+    clipboard.writeText(String(text || ''));
+    return true;
+  });
 
   // Workspace Storage handlers
   ipcMain.handle('workspaces:get-all', async () => {

@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCustomModelToken: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:token', h); return () => ipcRenderer.removeListener('custom-model:token', h); },
   onCustomModelDone: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:done', h); return () => ipcRenderer.removeListener('custom-model:done', h); },
   onCustomModelError: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:error', h); return () => ipcRenderer.removeListener('custom-model:error', h); },
+  readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
+  writeClipboardText: (text) => ipcRenderer.invoke('clipboard:write-text', text),
 
   // Workspace Storage Methods
   getWorkspaces: () => ipcRenderer.invoke('workspaces:get-all'),
