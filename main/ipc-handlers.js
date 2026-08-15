@@ -2,6 +2,8 @@ const { ipcMain, dialog } = require('electron');
 const ptyManager = require('./pty-manager');
 const agentConfig = require('./agent-config');
 const workspaceStore = require('./workspace-store');
+const customModelStore = require('./custom-model-store');
+const customModelService = require('./custom-model-service');
 
 function registerIpcHandlers({ openEditorFile } = {}) {
   // PTY session handlers
@@ -55,6 +57,14 @@ function registerIpcHandlers({ openEditorFile } = {}) {
   ipcMain.handle('agents:save', async (event, agentsList) => {
     return agentConfig.saveAgents(agentsList);
   });
+
+  // Custom remote models always use main-process networking. The renderer only
+  // receives sanitized configuration and streamed tokens through IPC.
+  ipcMain.handle('custom-models:list', () => customModelStore.list());
+  ipcMain.handle('custom-models:save', (event, models) => customModelStore.save(models));
+  ipcMain.handle('custom-models:test', (event, model) => customModelService.testConnection(model));
+  ipcMain.handle('custom-models:chat', (event, { paneId, model, messages }) =>
+    customModelService.streamChat(event.sender, paneId, model, messages));
 
   // Workspace Storage handlers
   ipcMain.handle('workspaces:get-all', async () => {
