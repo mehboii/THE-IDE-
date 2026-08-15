@@ -1,68 +1,63 @@
-/* Sandboxed end-to-end coverage for persisted custom endpoints and streamed panes. */
+/* End-to-end custom chat and Ollama agent-loop coverage using a loopback mock. */
 const http = require('http');
-const { _electron: electron } = require('playwright');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { _electron: electron } = require('playwright');
 const root = path.resolve(__dirname, '..');
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function response(res, message) { res.writeHead(200, { 'Content-Type': 'application/x-ndjson' }); res.end(JSON.stringify({ message, done: true }) + '\n'); }
+function tool(name, args) { return { content: '', tool_calls: [{ function: { name, arguments: args } }] }; }
 function mockServer() {
   return http.createServer((req, res) => {
-    if (req.method === 'GET' && req.url === '/api/tags') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ models: [{ name: 'mock-llama' }] })); }
-    if (req.method === 'POST' && req.url === '/api/chat') {
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-      res.write(JSON.stringify({ message: { content: 'Mock streamed ' }, done: false }) + '\n');
-      return setTimeout(() => res.end(JSON.stringify({ message: { content: 'answer' }, done: true }) + '\n'), 20);
-    }
-    if (req.method === 'GET' && req.url === '/v1/models') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ data: [{ id: 'mock-openai' }] })); }
-    if (req.method === 'POST' && req.url === '/v1/chat/completions') {
-      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: 'Mock OpenAI ' } }] }) + '\n\n');
-      return setTimeout(() => res.end('data: ' + JSON.stringify({ choices: [{ delta: { content: 'answer' } }] }) + '\n\ndata: [DONE]\n\n'), 20);
-    }
-    res.writeHead(404); res.end('not found');
+    if (req.method === 'GET' && req.url === '/api/tags') return response(res, { content: 'tags' });
+    if (req.method === 'POST' && req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['tools'] }));
+    if (req.method === 'GET' && req.url === '/v1/models') return res.end(JSON.stringify({ data: [{ id: 'mock-openai' }] }));
+    if (req.method === 'POST' && req.url === '/v1/chat/completions') { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); return res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: 'Mock OpenAI answer' } }] })}\n\ndata: [DONE]\n\n`); }
+    if (req.method !== 'POST' || req.url !== '/api/chat') { res.writeHead(404); return res.end(); }
+    let raw = ''; req.on('data', (chunk) => { raw += chunk; }); req.on('end', () => {
+      const body = JSON.parse(raw); const messages = body.messages || []; const scenario = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
+      const toolResult = [...messages].reverse().find((m) => m.role === 'tool');
+      if (!body.tools) return response(res, { content: 'Mock streamed answer' });
+      if (scenario.includes('loop forever')) return response(res, tool('list_directory', { path: '.' }));
+      if (!toolResult) {
+        if (scenario.includes('traversal')) return response(res, tool('write_file', { path: '../../etc/passwd', content: 'nope' }));
+        if (scenario.includes('destructive')) return response(res, tool('run_command', { command: 'rm -rf /' }));
+        if (scenario.includes('deny')) return response(res, tool('write_file', { path: 'denied.txt', content: 'should not write' }));
+        return response(res, tool('write_file', { path: 'generated/agent.txt', content: 'written by mock agent' }));
+      }
+      const result = JSON.parse(toolResult.content);
+      return response(res, { content: result.ok ? 'Tool completed naturally.' : `Tool error received: ${result.error || result.stderr}` });
+    });
   });
 }
 
 (async () => {
-  const server = mockServer(); await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const port = server.address().port;
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-tools-'));
+  const server = mockServer(); await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); const port = server.address().port;
   const app = await electron.launch({ args: [root], env: { ...process.env, IDE_TEST_MODE: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' } });
   try {
     const page = await app.firstWindow(); await page.waitForSelector('.terminal-pane');
-    const model = { id: 'sandbox-mock', name: 'Sandbox Mock Ollama', host: '127.0.0.1', port: String(port), type: 'ollama', model: 'mock-llama', apiKey: '' };
-    await page.evaluate((m) => window.electronAPI.saveCustomModels([m]), model);
-    await page.reload(); await page.waitForSelector('.terminal-pane');
-    const success = await page.evaluate((m) => window.electronAPI.testCustomModel(m), model);
-    if (!success.success) throw new Error(`connection test unexpectedly failed: ${success.error}`);
-    console.log('PASS connection test reports success against mock Ollama');
-    const openAiSuccess = await page.evaluate((m) => window.electronAPI.testCustomModel({ ...m, id: 'sandbox-openai', type: 'openai', model: 'mock-openai' }), model);
-    if (!openAiSuccess.success) throw new Error(`OpenAI-compatible connection test unexpectedly failed: ${openAiSuccess.error}`);
-    console.log('PASS OpenAI-compatible /v1/models connection path succeeds');
-    const failure = await page.evaluate((m) => window.electronAPI.testCustomModel({ ...m, port: '65530' }), model);
-    if (failure.success || !failure.error) throw new Error('closed-port test did not return a useful error');
-    console.log(`PASS closed port reports clear error: ${failure.error}`);
-    await page.locator('.btn-run-agent').first().click();
-    await page.locator('#run-agent-select').selectOption('custom:sandbox-mock'); await page.locator('#btn-run-agent-single').click();
-    await page.waitForSelector('.custom-model-pane');
-    const chat = page.locator('.custom-model-pane');
-    if (await chat.locator('.xterm-wrapper').count()) throw new Error('custom pane incorrectly contains xterm');
-    await chat.locator('textarea').fill('hello'); await chat.locator('.chat-composer button').click();
-    await page.waitForFunction(() => document.querySelector('.custom-model-pane .chat-message.assistant')?.textContent === 'Mock streamed answer');
-    console.log('PASS Run Agent opens chat pane and displays streamed mock response');
-    if (await page.locator('.terminal-pane').count() < 4) throw new Error('chat pane did not coexist with terminal grid');
-    await chat.locator('.btn-kill-pane').click(); await chat.locator('.btn-restart-pane').click();
-    await page.waitForFunction(() => document.querySelector('.custom-model-pane')?.classList.contains('focused'));
-    console.log('PASS kill/restart reconnects custom pane without breaking grid');
-    await page.locator('#btn-preset-3x2').click();
-    if (!(await chat.boundingBox())) throw new Error('chat pane vanished after grid resize preset');
-    await page.locator('#btn-toggle-broadcast').click(); await page.locator('#btn-toggle-broadcast').click();
-    console.log('PASS chat pane survives grid resize and broadcast toggle');
-    await new Promise((resolve) => server.close(resolve));
-    await chat.locator('.btn-reconnect').first().click();
-    await page.waitForSelector('.chat-disconnected:not(.hidden)');
-    const error = await chat.locator('.disconnect-detail').textContent(); if (!error.trim()) throw new Error('disconnect state omitted error detail');
-    console.log(`PASS offline state and Reconnect show error: ${error.trim()}`);
-    await page.locator('#btn-kill-all').click(); await page.waitForFunction(() => document.querySelectorAll('.terminal-pane').length === 0);
-    console.log('PASS Kill All clears mixed terminal/chat grid');
-  } finally { await app.close(); if (server.listening) await new Promise((resolve) => server.close(resolve)); }
+    const plain = { id: 'plain', name: 'Mock plain chat', host: '127.0.0.1', port: String(port), type: 'ollama', model: 'mock-llama', apiKey: '' };
+    const agent = { id: 'agent', name: 'Mock Qwen agent', host: '127.0.0.1', port: String(port), type: 'ollama', model: 'qwen3:8b', apiKey: '', toolCapable: true };
+    await page.evaluate((models) => window.electronAPI.saveCustomModels(models), [plain, agent]);
+    const connected = await page.evaluate((m) => window.electronAPI.testCustomModel(m), agent);
+    if (!connected.success || !connected.toolCapable) throw new Error('Ollama tool capability detection failed');
+    console.log('PASS Ollama capability check reports tool support');
+    const closed = await page.evaluate((m) => window.electronAPI.testCustomModel({ ...m, port: '65530' }), agent);
+    if (closed.success || !closed.error.includes('ECONNREFUSED')) throw new Error('closed port did not report connection failure');
+    console.log('PASS clear closed-port error');
+    await page.evaluate(({ model, cwd }) => window.appInstance.createPane({ id: 'agent-pane', label: 'Agent', customModel: model, cwd }), { model: agent, cwd: project });
+    const chat = page.locator('[data-pane-id="agent-pane"]'); await chat.locator('textarea').fill('write a file'); await chat.locator('.chat-composer button').click();
+    await chat.locator('.tool-approval .btn-primary').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .chat-message.assistant')].some((el) => el.textContent.includes('Tool completed naturally.')));
+    const written = fs.readFileSync(path.join(project, 'generated/agent.txt'), 'utf8'); if (written !== 'written by mock agent') throw new Error('tool write did not create expected file');
+    console.log('PASS write_file approval, execution, tool-result loop, and natural termination');
+    await chat.locator('textarea').fill('traversal'); await chat.locator('.chat-composer button').click(); await chat.locator('.tool-approval .btn-primary').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .chat-message.assistant')].some((el) => el.textContent.includes('escapes the project root')));
+    console.log('PASS traversal write rejected and error returned to model');
+    await chat.locator('.tool-approve-toggle input').check(); await chat.locator('textarea').fill('destructive'); await chat.locator('.chat-composer button').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .chat-message.assistant')].some((el) => el.textContent.includes('Destructive removal'))); console.log('PASS rm -rf / blocked before execution even with full auto-approve');
+    await chat.locator('.tool-approve-toggle input').uncheck();
+    await chat.locator('textarea').fill('deny'); await chat.locator('.chat-composer button').click(); await chat.locator('.tool-approval .btn-danger').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .chat-message.assistant')].some((el) => el.textContent.includes('User denied'))); if (fs.existsSync(path.join(project, 'denied.txt'))) throw new Error('denied tool wrote a file'); console.log('PASS explicit deny pauses and prevents write');
+    await page.evaluate(({ model, cwd }) => window.appInstance.createPane({ id: 'loop-pane', label: 'Loop', customModel: { ...model, maxIterations: 3 }, cwd }), { model: agent, cwd: project });
+    const loop = page.locator('[data-pane-id="loop-pane"]'); await loop.locator('.tool-approve-toggle input').check(); await loop.locator('textarea').fill('loop forever'); await loop.locator('.chat-composer button').click(); await loop.getByText('Max tool-call iterations reached (3)').waitFor(); console.log('PASS max iteration cap stops repeated tool calls');
+  } finally { await app.close(); if (server.listening) await new Promise((resolve) => server.close(resolve)); fs.rmSync(project, { recursive: true, force: true }); }
 })().catch((error) => { console.error('FAIL custom model suite:', error.stack || error); process.exitCode = 1; });

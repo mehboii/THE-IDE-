@@ -146,6 +146,9 @@ class AppController {
     window.electronAPI.onCustomModelToken(({ paneId, token }) => this.panes.get(paneId)?.receiveToken?.(token));
     window.electronAPI.onCustomModelDone(({ paneId }) => this.panes.get(paneId)?.receiveDone?.());
     window.electronAPI.onCustomModelError(({ paneId, error }) => this.panes.get(paneId)?.disconnect?.(error));
+    window.electronAPI.onCustomModelToolCall((data) => this.panes.get(data.paneId)?.showToolCall?.(data));
+    window.electronAPI.onCustomModelToolResult((data) => this.panes.get(data.paneId)?.showToolResult?.(data));
+    window.electronAPI.onCustomModelMaxIterations((data) => this.panes.get(data.paneId)?.showMaxIterations?.(data.maxIterations));
   }
 
   async checkTmux() {
@@ -197,7 +200,7 @@ class AppController {
         return this.panes.get(paneId);
       }
 
-      if (customModel) return this.createCustomModelPane({ id: paneId, label, customModel });
+      if (customModel) return this.createCustomModelPane({ id: paneId, label, customModel, cwd });
       const agentObj = this.agentsList.find((a) => a.id === agentId) || this.agentsList.find((a) => a.id === 'shell') || this.agentsList[0];
       const initialCwd = cwd || '';
 
@@ -263,10 +266,11 @@ class AppController {
     }
   }
 
-  async createCustomModelPane({ id, label, customModel }) {
-    const pane = new CustomModelPane({ id, label: label || customModel.name, model: customModel,
+  async createCustomModelPane({ id, label, customModel, cwd }) {
+    const pane = new CustomModelPane({ id, label: label || customModel.name, model: customModel, cwd,
       onFocus: (pId) => this.focusPane(pId), onClose: (pId) => this.removePane(pId),
       onRestart: (pId) => this.restartPane(pId), onKill: (pId) => this.killPaneSession(pId),
+      onCwdChange: (pId, newCwd) => { this.panes.get(pId)?.setCwd(newCwd); },
       onLabelChange: () => { this.renderEditorTabs(); this.renderSidebarSessions(); },
       onStatusChange: () => { this.renderEditorTabs(); this.renderSidebarSessions(); } });
     await pane.init(); this.panes.set(id, pane); this.gridManager.addPaneToGrid(pane); this.focusPane(id);
@@ -668,15 +672,15 @@ class AppController {
   }
 
   openCustomModelModal(model = null) {
-    this._editingCustomModelId = model?.id || null; this.customModelForm.reset(); this.customModelTestResult.textContent = '';
+    this._editingCustomModelId = model?.id || null; this._detectedToolCapable = model?.toolCapable; this.customModelForm.reset(); this.customModelTestResult.textContent = '';
     ['name', 'host', 'port', 'type', 'model', 'apiKey'].forEach((key) => { if (model?.[key] != null) this.customModelForm.elements[key].value = model[key]; });
     document.getElementById('custom-model-title').textContent = model ? 'Edit Custom Model' : 'Add Custom Model';
     document.getElementById('btn-delete-custom-model').classList.toggle('hidden', !model); this.modalCustomModel.classList.remove('hidden');
   }
   closeCustomModelModal() { this.modalCustomModel.classList.add('hidden'); }
-  customModelFromForm() { const data = Object.fromEntries(new FormData(this.customModelForm)); return { id: this._editingCustomModelId || `custom-${Date.now()}`, ...data, port: String(data.port).trim() }; }
+  customModelFromForm() { const data = Object.fromEntries(new FormData(this.customModelForm)); const likelyToolCapable = data.type === 'ollama' && /^(qwen3|qwen2\.5|llama3\.1|llama3\.2|mistral-nemo|mistral-small|command-r|hermes)/i.test(String(data.model || '')); const toolCapable = data.type === 'ollama' && (this._detectedToolCapable ?? likelyToolCapable); return { id: this._editingCustomModelId || `custom-${Date.now()}`, ...data, port: String(data.port).trim(), toolCapable }; }
   async saveCustomModel() { if (!this.customModelForm.reportValidity()) return; const model = this.customModelFromForm(); const i = this.customModels.findIndex((m) => m.id === model.id); if (i >= 0) this.customModels[i] = model; else this.customModels.push(model); this.customModels = await window.electronAPI.saveCustomModels(this.customModels); this.renderCustomModels(); this.closeCustomModelModal(); }
-  async testCustomModel() { if (!this.customModelForm.reportValidity()) return; const r = await window.electronAPI.testCustomModel(this.customModelFromForm()); this.customModelTestResult.className = `custom-model-test-result ${r.success ? 'success' : 'error'}`; this.customModelTestResult.textContent = r.success ? `Connected: ${r.message}` : `Connection failed: ${r.error}`; }
+  async testCustomModel() { if (!this.customModelForm.reportValidity()) return; const r = await window.electronAPI.testCustomModel(this.customModelFromForm()); if (r.success) this._detectedToolCapable = r.toolCapable; this.customModelTestResult.className = `custom-model-test-result ${r.success ? 'success' : 'error'}`; this.customModelTestResult.textContent = r.success ? `Connected: ${r.message}. ${r.toolCapable ? 'Tool calling available; agent mode will be enabled.' : 'Tool calling is not detected; this model will use plain chat.'}` : `Connection failed: ${r.error}`; }
 
   openRunAgentModal({ targetPaneId, selectedAgentId }) {
     if (!this.modalRunAgent) return;
@@ -717,7 +721,7 @@ class AppController {
         for (const paneId of targets) {
           const old = this.panes.get(paneId); if (!old) continue;
           await this.removePane(paneId);
-          await this.createPane({ id: paneId, label: scope === 'all' ? `${model.name}` : model.name, customModel: model });
+          await this.createPane({ id: paneId, label: scope === 'all' ? `${model.name}` : model.name, cwd: old.cwd, customModel: model });
         }
       })();
       return;

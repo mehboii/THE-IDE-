@@ -643,6 +643,8 @@ kbd {
 
 /* Remote model pane: it intentionally shares the grid chrome with terminals. */
 .custom-model-badge { color: #9cdcfe; font-size: 11px; padding: 1px 5px; border: 1px solid #397a9e; border-radius: 8px; }
+.custom-cwd, .tool-approve-toggle { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; color: var(--text-muted); font-size: 11px; }
+.tool-approve-toggle { display: flex; gap: 3px; align-items: center; }
 .chat-body { min-height: 0; flex: 1; display: flex; flex-direction: column; background: #1e1e1e; }
 .chat-messages { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; user-select: text; }
 .chat-message { max-width: 88%; white-space: pre-wrap; padding: 8px 10px; border-radius: 5px; line-height: 1.45; }
@@ -650,6 +652,7 @@ kbd {
 .chat-message.user { align-self: flex-end; background: #094771; color: white; }.chat-message.assistant { align-self: flex-start; background: #2d2d2d; color: var(--text-main); }
 .chat-composer { display: flex; gap: 8px; padding: 8px; border-top: 1px solid var(--border-color); }.chat-composer textarea { flex: 1; resize: none; padding: 6px; background: var(--vscode-input-background); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 2px; }
 .chat-disconnected { position: absolute; left: 18px; right: 18px; bottom: 58px; z-index: 3; padding: 10px; background: #5a1d1d; border: 1px solid #9c3838; color: #f48771; display: flex; gap: 8px; align-items: center; }
+.tool-call { background: #252526; border-left: 3px solid #4ec9b0; padding: 6px 8px; color: var(--text-main); }.tool-call summary { cursor: pointer; }.tool-call pre { margin: 7px 0 0; white-space: pre-wrap; color: var(--text-muted); user-select: text; }.tool-result.ok { color: var(--color-success); }.tool-result.error { color: var(--color-danger); }.tool-approval { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
 
 /* =============================================================================
    Editor tabs (VS Code style)
