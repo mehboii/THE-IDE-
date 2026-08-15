@@ -217,6 +217,21 @@ class TerminalPane {
       this.terminal.textarea.addEventListener('focus', () => {
         if (this.onFocus) this.onFocus(this.id);
       });
+      this.terminal.textarea.addEventListener('keydown', async (event) => {
+        const primary = event.metaKey || event.ctrlKey;
+        if (!primary || event.altKey) return;
+        if (event.key.toLowerCase() === 'c' && this.terminal.hasSelection()) {
+          event.preventDefault();
+          await window.electronAPI.writeClipboardText(this.terminal.getSelection());
+        }
+        if (event.key.toLowerCase() === 'v') {
+          event.preventDefault();
+          const text = await window.electronAPI.readClipboardText();
+          if (!text) return;
+          window.electronAPI.writePty(this.id, text);
+          if (window.broadcastManager) window.broadcastManager.handleKeystroke(this.id, text, window.appInstance.panes);
+        }
+      });
     }
 
     // Debounced fit after open
