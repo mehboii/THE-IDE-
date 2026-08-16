@@ -32,7 +32,7 @@ class PtyManager {
     return { available: result.ok, version: result.ok ? result.stdout.trim() : null, error: result.error };
   }
 
-  async createSession({ paneId, cwd, agentCommand = '', envVars = {}, customSessionName, cols = 80, rows = 24, forceNew = false }) {
+  async createSession({ paneId, cwd, agentCommand = '', envVars = {}, customSessionName, cols = 80, rows = 24, forceNew = true }) {
     if (!paneId) throw new Error('paneId is required');
     await this.destroySession(paneId, false);
 
@@ -78,12 +78,17 @@ class PtyManager {
     // Normal tmux-backed session
     const sessionName = this.sessionName(paneId, customSessionName);
 
-    // forceNew: kill any leftover tmux session so we never reattach to a dead one
+    // A new pane must never attach to an old fixed-name tmux session: tmux then
+    // retains that session's original cwd, even though `-c safeCwd` is supplied.
+    // Existing-session restoration is handled explicitly by the orphan-session
+    // UI, which passes forceNew:false when it truly intends to reattach.
     if (forceNew) {
       await this.killTmuxSession(sessionName).catch(() => {});
     }
 
-    const args = ['new-session', '-A', '-s', sessionName, '-c', safeCwd];
+    const args = forceNew
+      ? ['new-session', '-s', sessionName, '-c', safeCwd]
+      : ['new-session', '-A', '-s', sessionName, '-c', safeCwd];
     if (agentCommand.trim()) {
       args.push('/bin/sh', '-lc', `${agentCommand}; exec "${process.env.SHELL || '/bin/sh'}" -l`);
     }
