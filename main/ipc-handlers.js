@@ -4,8 +4,14 @@ const agentConfig = require('./agent-config');
 const workspaceStore = require('./workspace-store');
 const customModelStore = require('./custom-model-store');
 const customModelService = require('./custom-model-service');
+const projectRoot = require('./project-root');
 
 function registerIpcHandlers({ openEditorFile } = {}) {
+  // The active project root is deliberately main-process state so the file
+  // tree, PTY spawner, and model tool loop cannot silently drift apart.
+  ipcMain.handle('project-root:get', () => projectRoot.get());
+  ipcMain.handle('project-root:set', (event, root) => projectRoot.set(root));
+
   // PTY session handlers
   ipcMain.handle('pty:create', async (event, params) => {
     return ptyManager.createSession(params);

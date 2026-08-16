@@ -1,6 +1,7 @@
 const { spawn } = require('node-pty');
 const { execFile } = require('child_process');
 const fs = require('fs');
+const projectRoot = require('./project-root');
 
 const TMUX_PREFIX = 'ide-';
 
@@ -35,7 +36,10 @@ class PtyManager {
     if (!paneId) throw new Error('paneId is required');
     await this.destroySession(paneId, false);
 
-    const safeCwd = cwd && fs.existsSync(cwd) && fs.statSync(cwd).isDirectory() ? cwd : process.cwd();
+    // A pane may deliberately retain its own cwd, but a newly-created pane
+    // defaults to the one main-process project root shared with the explorer.
+    const requestedCwd = cwd || projectRoot.get();
+    const safeCwd = requestedCwd && fs.existsSync(requestedCwd) && fs.statSync(requestedCwd).isDirectory() ? requestedCwd : process.cwd();
     const tmux = await this.checkTmuxAvailable();
 
     // Fallback mode when tmux is not installed / not on PATH

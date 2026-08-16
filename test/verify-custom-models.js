@@ -21,6 +21,7 @@ function mockServer() {
       if (!body.tools) return response(res, { content: 'Mock streamed answer' });
       if (scenario.includes('loop forever')) return response(res, tool('list_directory', { path: '.' }));
       if (!toolResult) {
+        if (scenario.includes('list files')) return response(res, tool('list_directory', { path: '.' }));
         if (scenario.includes('traversal')) return response(res, tool('write_file', { path: '../../etc/passwd', content: 'nope' }));
         if (scenario.includes('destructive')) return response(res, tool('run_command', { command: 'rm -rf /' }));
         if (scenario.includes('deny')) return response(res, tool('write_file', { path: 'denied.txt', content: 'should not write' }));
@@ -34,12 +35,16 @@ function mockServer() {
 
 (async () => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-tools-'));
+  fs.writeFileSync(path.join(project, 'hello.txt'), 'known hello content\n');
   const server = mockServer(); await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); const port = server.address().port;
   const app = await electron.launch({ args: [root], env: { ...process.env, IDE_TEST_MODE: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' } });
   try {
     const page = await app.firstWindow(); await page.waitForSelector('.terminal-pane');
     const plain = { id: 'plain', name: 'Mock plain chat', host: '127.0.0.1', port: String(port), type: 'ollama', model: 'mock-llama', apiKey: '' };
     const agent = { id: 'agent', name: 'Mock Qwen agent', host: '127.0.0.1', port: String(port), type: 'ollama', model: 'qwen3:8b', apiKey: '', toolCapable: true };
+    // This is the same main-process root set by Open Folder; deliberately do
+    // not pass cwd when creating the pane below.
+    await page.evaluate((dir) => window.electronAPI.setProjectRoot(dir), project);
     await page.evaluate((models) => window.electronAPI.saveCustomModels(models), [plain, agent]);
     const connected = await page.evaluate((m) => window.electronAPI.testCustomModel(m), agent);
     if (!connected.success || !connected.toolCapable) throw new Error('Ollama tool capability detection failed');
@@ -47,11 +52,13 @@ function mockServer() {
     const closed = await page.evaluate((m) => window.electronAPI.testCustomModel({ ...m, port: '65530' }), agent);
     if (closed.success || !closed.error.includes('ECONNREFUSED')) throw new Error('closed port did not report connection failure');
     console.log('PASS clear closed-port error');
-    await page.evaluate(({ model, cwd }) => window.appInstance.createPane({ id: 'agent-pane', label: 'Agent', customModel: model, cwd }), { model: agent, cwd: project });
+    await page.evaluate((model) => window.appInstance.createPane({ id: 'agent-pane', label: 'Agent', customModel: model }), agent);
     const chat = page.locator('[data-pane-id="agent-pane"]'); await chat.locator('textarea').fill('write a file'); await chat.locator('.chat-composer button').click();
     await chat.locator('.tool-approval .btn-primary').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .chat-message.assistant')].some((el) => el.textContent.includes('Tool completed naturally.')));
     const written = fs.readFileSync(path.join(project, 'generated/agent.txt'), 'utf8'); if (written !== 'written by mock agent') throw new Error('tool write did not create expected file');
     console.log('PASS write_file approval, execution, tool-result loop, and natural termination');
+    await chat.locator('textarea').fill('list files in this directory'); await chat.locator('.chat-composer button').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .tool-result')].some((el) => el.textContent.includes('hello.txt')));
+    console.log('PASS tool-calling agent lists hello.txt from the Open Folder project root');
     await chat.locator('textarea').fill('traversal'); await chat.locator('.chat-composer button').click(); await chat.locator('.tool-approval .btn-primary').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .chat-message.assistant')].some((el) => el.textContent.includes('escapes the project root')));
     console.log('PASS traversal write rejected and error returned to model');
     await chat.locator('.tool-approve-toggle input').check(); await chat.locator('textarea').fill('destructive'); await chat.locator('.chat-composer button').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .chat-message.assistant')].some((el) => el.textContent.includes('Destructive removal'))); console.log('PASS rm -rf / blocked before execution even with full auto-approve');

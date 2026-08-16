@@ -1,6 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Authoritative current project root (owned by the main process)
+  getProjectRoot: () => ipcRenderer.invoke('project-root:get'),
+  setProjectRoot: (root) => ipcRenderer.invoke('project-root:set', root),
+
   // PTY Methods
   createPty: (params) => ipcRenderer.invoke('pty:create', params),
   writePty: (paneId, data) => ipcRenderer.send('pty:write', { paneId, data }),

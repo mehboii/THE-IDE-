@@ -107,6 +107,13 @@ class AppController {
     this.fileExplorer.onFileSelect((filePath) => {
       window.electronAPI.openEditorFile(filePath);
     });
+    this.fileExplorer.onRootChange(async (dirPath) => {
+      await window.electronAPI.setProjectRoot(dirPath);
+    });
+
+    // Restore the explorer as a view of the authoritative main-process root.
+    const projectRoot = await window.electronAPI.getProjectRoot();
+    if (projectRoot) await this.fileExplorer.setRootDirectory(projectRoot);
 
     const orphans = await window.electronAPI.listOrphans();
     if (orphans && orphans.length > 0 && !window.__IDE_TEST_MODE__) {
@@ -202,7 +209,9 @@ class AppController {
 
       if (customModel) return this.createCustomModelPane({ id: paneId, label, customModel, cwd });
       const agentObj = this.agentsList.find((a) => a.id === agentId) || this.agentsList.find((a) => a.id === 'shell') || this.agentsList[0];
-      const initialCwd = cwd || '';
+      // Explicit cwd is a per-pane override (restored workspace / pane picker).
+      // Otherwise take a fresh snapshot of the authoritative project root.
+      const initialCwd = cwd || await window.electronAPI.getProjectRoot() || '';
 
       const pane = new TerminalPane({
         id: paneId,
@@ -267,7 +276,10 @@ class AppController {
   }
 
   async createCustomModelPane({ id, label, customModel, cwd }) {
-    const pane = new CustomModelPane({ id, label: label || customModel.name, model: customModel, cwd,
+    // A chat pane snapshots the project root at creation, matching terminal
+    // behavior. Later Open Folder calls do not move existing panes.
+    const initialCwd = cwd || await window.electronAPI.getProjectRoot() || '';
+    const pane = new CustomModelPane({ id, label: label || customModel.name, model: customModel, cwd: initialCwd,
       onFocus: (pId) => this.focusPane(pId), onClose: (pId) => this.removePane(pId),
       onRestart: (pId) => this.restartPane(pId), onKill: (pId) => this.killPaneSession(pId),
       onCwdChange: (pId, newCwd) => { this.panes.get(pId)?.setCwd(newCwd); },
