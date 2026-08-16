@@ -191,7 +191,7 @@ class AppController {
     return this.panes.size + this._pendingCreates;
   }
 
-  async createPane({ id, label, cwd, agentId, customSessionName, customModel } = {}) {
+  async createPane({ id, label, cwd, agentId, customSessionName, customModel, forceNew } = {}) {
     if (this.effectivePaneCount() >= 6) {
       this.showBanner('Maximum 6 terminal panes supported simultaneously.');
       return null;
@@ -248,6 +248,10 @@ class AppController {
           agentCommand: agentObj ? agentObj.command : '',
           envVars: agentObj ? (agentObj.env || {}) : {},
           customSessionName,
+          // IPC structured cloning may omit undefined object properties.
+          // Send an explicit value so ordinary panes cannot reattach to a
+          // fixed-name tmux session from an earlier launch.
+          forceNew: forceNew !== false,
           cols: dims.cols,
           rows: dims.rows
         });
@@ -445,6 +449,7 @@ class AppController {
           id: sName.replace(/^ide-/, ''),
           label: sName,
           customSessionName: sName,
+          forceNew: false,
           agentId: 'shell'
         });
         e.currentTarget.closest('li').remove();
@@ -463,6 +468,7 @@ class AppController {
         id: sessionName.replace(/^ide-/, ''),
         label: sessionName,
         customSessionName: sessionName,
+        forceNew: false,
         agentId: 'shell'
       });
     }
@@ -724,7 +730,7 @@ class AppController {
     if (this.modalRunAgent) this.modalRunAgent.classList.add('hidden');
   }
 
-  executeAgent({ targetPaneId, agentId, scope }) {
+  async executeAgent({ targetPaneId, agentId, scope }) {
     if (agentId.startsWith('custom:')) {
       const model = this.customModels.find((m) => m.id === agentId.slice(7));
       if (!model) return this.showBanner('That custom model no longer exists.', 'error');
@@ -743,9 +749,21 @@ class AppController {
 
     const cmd = agentObj.command || '';
 
+    const startInProjectRoot = async (pane) => {
+      // Run Agent starts a new CLI session in the open project, even when the
+      // target is a default pane that was created before Open Folder. This
+      // uses the same main-process root resolution as ordinary new panes.
+      const projectRoot = await window.electronAPI.getProjectRoot();
+      const launchCwd = projectRoot || pane.cwd;
+      if (launchCwd && pane.cwd !== launchCwd) {
+        await this.changePaneCwd(pane.id, launchCwd);
+      }
+    };
+
     if (scope === 'single') {
       const pane = this.panes.get(targetPaneId);
       if (pane) {
+        await startInProjectRoot(pane);
         if (cmd.trim()) {
           window.electronAPI.writePty(pane.id, cmd + '\r');
         }
@@ -757,6 +775,7 @@ class AppController {
     } else if (scope === 'all') {
       let idx = 1;
       for (const pane of this.panes.values()) {
+        await startInProjectRoot(pane);
         if (cmd.trim()) {
           window.electronAPI.writePty(pane.id, cmd + '\r');
         }

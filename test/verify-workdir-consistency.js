@@ -1,6 +1,7 @@
 /* End-to-end coverage for Open Folder -> file tree, new PTY, and root changes. */
 const { _electron: electron } = require('playwright');
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 const os = require('os');
 const path = require('path');
 
@@ -66,6 +67,39 @@ async function command(page, paneId, text, expected) {
     console.log(`PWD B: ${projectB}`);
     await command(page, paneA, 'pwd', projectA);
     console.log(`PWD existing A after switch: ${projectA}`);
+    // Keep within the app's six-pane limit before adding the dedicated
+    // stale-session Run Agent probe below.
+    await page.evaluate((paneId) => window.appInstance.removePane(paneId), paneA);
+
+    // Shell 1 existed before Open Folder. Run Agent must restart it in the
+    // current project rather than type its command into the old startup cwd.
+    await page.evaluate(() => {
+      window.appInstance.agentsList = [{ id: 'cwd-probe', name: 'Cwd probe', command: 'pwd', env: {} }];
+      return window.appInstance.executeAgent({ targetPaneId: 'pane-1', agentId: 'cwd-probe', scope: 'single' });
+    });
+    await waitForBuffer(page, 'pane-1', projectB);
+    console.log(`RUN AGENT SHELL 1 CWD: ${projectB}`);
+
+    // Reproduce the former Run Agent failure: a fixed pane ID had an old tmux
+    // session whose cwd differed from the newly opened project. The app must
+    // replace it, then Run Agent's write-to-pane path must inherit projectB.
+    const runAgentPane = `run-agent-${runId}`;
+    const staleSession = `ide-${runAgentPane}`;
+    execFileSync('tmux', ['new-session', '-d', '-s', staleSession, '-c', projectA]);
+    await page.evaluate((paneId) => window.appInstance.createPane({ id: paneId, label: 'Run Agent', agentId: 'shell' }), runAgentPane);
+    await command(page, runAgentPane, 'pwd', projectB);
+    console.log(`RUN AGENT PANE CWD BEFORE COMMAND: ${projectB}`);
+    await page.evaluate((paneId) => window.appInstance.executeAgent({ targetPaneId: paneId, agentId: 'cwd-probe', scope: 'single' }), runAgentPane);
+    await waitForBuffer(page, runAgentPane, projectB);
+    console.log(`RUN AGENT COMMAND CWD: ${projectB}`);
+
+    // The Explorer should update from a root-directory fs.watch notification,
+    // without reopening the folder or explicitly calling render().
+    const created = path.join(projectB, 'StarPattern.java');
+    fs.writeFileSync(created, 'class StarPattern {}\n');
+    await page.getByText('StarPattern.java', { exact: true }).waitFor();
+    console.log('EXPLORER AUTO-REFRESH: StarPattern.java appeared');
+    try { execFileSync('tmux', ['kill-session', '-t', staleSession]); } catch (_) {}
   } finally {
     try { await app.close(); } catch (_) {}
     fs.rmSync(parent, { recursive: true, force: true });

@@ -208,6 +208,8 @@ function registerIpcHandlers({ openEditorFile } = {}) {
     }
   });
 
+  // fs.watch accepts both a file and a directory. The Explorer watches its
+  // project root to receive structural changes made by terminal agents.
   ipcMain.handle('fs:watch-file', (event, filePath) => {
     const key = watcherKey(event.sender, filePath);
     if (!filePath || fileWatchers.has(key)) return true;

@@ -6,6 +6,12 @@ class FileExplorer {
     this.onFileSelectCallback = null;
     this.onRootChangeCallback = null;
     this.expandedDirs = new Set();
+    this.watchedRootDir = null;
+    this.unsubscribeFileChanges = window.electronAPI.onFileChanged(({ filePath }) => {
+      // The main process watches the open root. A rerender keeps the Explorer
+      // in sync when terminal agents create, rename, or remove files there.
+      if (this.watchedRootDir && filePath === this.watchedRootDir) this.render();
+    });
 
     if (this.openFolderBtnEl) {
       this.openFolderBtnEl.addEventListener('click', () => this.handleOpenFolderClick());
@@ -29,10 +35,18 @@ class FileExplorer {
     if (!dirPath) return;
     if (this.currentRootDir === dirPath && !force) return;
 
+    if (this.watchedRootDir && this.watchedRootDir !== dirPath) {
+      await window.electronAPI.unwatchFile(this.watchedRootDir);
+      this.watchedRootDir = null;
+    }
     this.currentRootDir = dirPath;
     this.expandedDirs.clear();
     this.expandedDirs.add(dirPath);
     await this.onRootChangeCallback?.(dirPath);
+    if (this.watchedRootDir !== dirPath) {
+      const watching = await window.electronAPI.watchFile(dirPath);
+      if (watching) this.watchedRootDir = dirPath;
+    }
     await this.render();
   }
 
