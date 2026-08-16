@@ -1,5 +1,6 @@
 const { randomUUID } = require('crypto');
 const { TOOL_SCHEMA, executeTool, title } = require('./custom-model-tools');
+const projectRoot = require('./project-root');
 
 const CONNECT_TIMEOUT_MS = 10_000;
 
@@ -118,7 +119,10 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
     ? { model: model.model, messages, stream: true }
     : { model: model.model, messages, stream: true };
   try {
-    if (model.type === 'ollama') return await streamOllamaAgent(webContents, paneId, requestId, model, messages, cwd, fullAutoApprove, Math.min(Math.max(Number(maxIterations) || 25, 1), 100));
+    // Capture the root when this request begins. Existing chat panes keep their
+    // own cwd after a later Open Folder, just like an already-running shell.
+    const projectCwd = cwd || projectRoot.get() || process.cwd();
+    if (model.type === 'ollama') return await streamOllamaAgent(webContents, paneId, requestId, model, messages, projectCwd, fullAutoApprove, Math.min(Math.max(Number(maxIterations) || 25, 1), 100));
     const response = await request(url, { method: 'POST', headers: headers(model), body: JSON.stringify(body) });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' — check API key' : ''}`);
     if (!response.body) throw new Error('The endpoint returned no response stream.');

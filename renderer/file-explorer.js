@@ -4,6 +4,7 @@ class FileExplorer {
     this.openFolderBtnEl = openFolderBtnEl;
     this.currentRootDir = null;
     this.onFileSelectCallback = null;
+    this.onRootChangeCallback = null;
     this.expandedDirs = new Set();
 
     if (this.openFolderBtnEl) {
@@ -15,10 +16,12 @@ class FileExplorer {
     this.onFileSelectCallback = fn;
   }
 
+  onRootChange(fn) { this.onRootChangeCallback = fn; }
+
   async handleOpenFolderClick() {
     const selected = await window.electronAPI.selectDirectory(this.currentRootDir || undefined);
     if (selected) {
-      this.setRootDirectory(selected, true);
+      await this.setRootDirectory(selected, true);
     }
   }
 
@@ -29,6 +32,7 @@ class FileExplorer {
     this.currentRootDir = dirPath;
     this.expandedDirs.clear();
     this.expandedDirs.add(dirPath);
+    await this.onRootChangeCallback?.(dirPath);
     await this.render();
   }
 
