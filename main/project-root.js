@@ -14,8 +14,10 @@ class ProjectRoot {
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
       throw new Error('Project root must be an existing directory.');
     }
-    this.currentWorkspaceRoot = resolved;
-    return resolved;
+    // A physical path is the one spelling shared by Explorer, PTYs and tools.
+    // This removes symlink/trailing-spelling drift between those consumers.
+    this.currentWorkspaceRoot = fs.realpathSync(resolved);
+    return this.currentWorkspaceRoot;
   }
 }
 

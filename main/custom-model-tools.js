@@ -2,6 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { exec } = require('child_process');
 const { promisify } = require('util');
+const projectRoot = require('./project-root');
 
 const execAsync = promisify(exec);
 
@@ -12,7 +13,8 @@ const TOOL_SCHEMA = [
   { type: 'function', function: { name: 'run_command', description: 'Run a project-scoped shell command.', parameters: { type: 'object', properties: { command: { type: 'string' }, cwd: { type: 'string' } }, required: ['command'] } } }
 ];
 
-function rootFor(cwd) { return path.resolve(cwd || process.cwd()); }
+// Tool calls use the same opened-folder root as Explorer and PTY spawning.
+function rootFor(cwd) { return projectRoot.get() || path.resolve(cwd || process.cwd()); }
 function inside(root, target) { return target === root || target.startsWith(`${root}${path.sep}`); }
 function resolvedPath(root, requested = '.') {
   if (typeof requested !== 'string' || path.isAbsolute(requested)) throw new Error('Path must be relative to the project root.');

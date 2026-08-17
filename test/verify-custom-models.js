@@ -42,9 +42,11 @@ function mockServer() {
     const page = await app.firstWindow(); await page.waitForSelector('.terminal-pane');
     const plain = { id: 'plain', name: 'Mock plain chat', host: '127.0.0.1', port: String(port), type: 'ollama', model: 'mock-llama', apiKey: '' };
     const agent = { id: 'agent', name: 'Mock Qwen agent', host: '127.0.0.1', port: String(port), type: 'ollama', model: 'qwen3:8b', apiKey: '', toolCapable: true };
-    // This is the same main-process root set by Open Folder; deliberately do
-    // not pass cwd when creating the pane below.
-    await page.evaluate((dir) => window.electronAPI.setProjectRoot(dir), project);
+    // Use the actual Open Folder flow; deliberately do not pass cwd when
+    // creating the agent pane below.
+    await page.evaluate((dir) => window.electronAPI.setTestDirectoryPath(dir), project);
+    await page.evaluate(() => window.appInstance.fileExplorer.handleOpenFolderClick());
+    await page.getByText('hello.txt', { exact: true }).waitFor();
     await page.evaluate((models) => window.electronAPI.saveCustomModels(models), [plain, agent]);
     const connected = await page.evaluate((m) => window.electronAPI.testCustomModel(m), agent);
     if (!connected.success || !connected.toolCapable) throw new Error('Ollama tool capability detection failed');
@@ -57,6 +59,9 @@ function mockServer() {
     await chat.locator('.tool-approval .btn-primary').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .chat-message.assistant')].some((el) => el.textContent.includes('Tool completed naturally.')));
     const written = fs.readFileSync(path.join(project, 'generated/agent.txt'), 'utf8'); if (written !== 'written by mock agent') throw new Error('tool write did not create expected file');
     console.log('PASS write_file approval, execution, tool-result loop, and natural termination');
+    await page.getByText('generated', { exact: true }).click();
+    await page.getByText('agent.txt', { exact: true }).waitFor();
+    console.log('PASS explicit agent prompt created generated/agent.txt and Explorer auto-refresh shows it');
     await chat.locator('textarea').fill('list files in this directory'); await chat.locator('.chat-composer button').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .tool-result')].some((el) => el.textContent.includes('hello.txt')));
     console.log('PASS tool-calling agent lists hello.txt from the Open Folder project root');
     await chat.locator('textarea').fill('traversal'); await chat.locator('.chat-composer button').click(); await chat.locator('.tool-approval .btn-primary').click(); await page.waitForFunction(() => [...document.querySelectorAll('[data-pane-id="agent-pane"] .chat-message.assistant')].some((el) => el.textContent.includes('escapes the project root')));
