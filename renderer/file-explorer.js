@@ -75,7 +75,7 @@ class FileExplorer {
     header.setAttribute('aria-expanded', String(this.expandedDirs.has(this.currentRootDir)));
     const folderName = this.currentRootDir.split(/[/\\]/).pop() || this.currentRootDir;
     header.innerHTML = `
-      <span class="tree-icon">${this.expandedDirs.has(this.currentRootDir) ? '📂' : '📁'}</span>
+      <span class="tree-icon">${this.expandedDirs.has(this.currentRootDir) ? 'v' : '>'}</span>
       <span class="file-tree-root-title" title="${this.currentRootDir}"><strong>${folderName}</strong></span>
     `;
     const toggleRoot = async () => {
@@ -119,7 +119,7 @@ class FileExplorer {
       itemEl.style.paddingLeft = `${depth * 14 + 8}px`;
 
       const icon = entry.isDirectory
-        ? (this.expandedDirs.has(entry.path) ? '📂' : '📁')
+        ? (this.expandedDirs.has(entry.path) ? 'v' : '>')
         : this.getFileIcon(entry.name);
 
       itemEl.innerHTML = `
@@ -142,11 +142,11 @@ class FileExplorer {
           if (this.expandedDirs.has(entry.path)) {
             this.expandedDirs.delete(entry.path);
             childContainer.style.display = 'none';
-            itemEl.querySelector('.tree-icon').textContent = '📁';
+            itemEl.querySelector('.tree-icon').textContent = '>';
           } else {
             this.expandedDirs.add(entry.path);
             childContainer.style.display = 'block';
-            itemEl.querySelector('.tree-icon').textContent = '📂';
+            itemEl.querySelector('.tree-icon').textContent = 'v';
             if (childContainer.children.length === 0) {
               await this.populateDirNode(entry.path, childContainer, depth + 1);
             }
@@ -172,16 +172,15 @@ class FileExplorer {
   getFileIcon(filename) {
     const ext = filename.split('.').pop().toLowerCase();
     switch (ext) {
-      case 'js': case 'jsx': case 'mjs': return '🟨';
-      case 'ts': case 'tsx': return '🔷';
-      case 'py': case 'pyw': return '🐍';
-      case 'json': return '📋';
-      case 'md': return '📝';
-      case 'html': return '🌐';
-      case 'css': case 'scss': case 'less': return '🎨';
-      case 'sh': case 'bash': case 'zsh': return '🐚';
-      case 'png': case 'jpg': case 'jpeg': case 'svg': case 'gif': return '🖼️';
-      default: return '📄';
+      case 'js': case 'jsx': case 'mjs': return 'JS';
+      case 'ts': case 'tsx': return 'TS';
+      case 'py': case 'pyw': return 'PY';
+      case 'json': return '{}';
+      case 'md': return 'MD';
+      case 'html': return '<>';
+      case 'css': case 'scss': case 'less': return '#';
+      case 'sh': case 'bash': case 'zsh': return '>';
+      default: return '-';
     }
   }
 }

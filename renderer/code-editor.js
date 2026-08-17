@@ -341,7 +341,7 @@ class CodeEditorManager {
       tabEl.innerHTML = `
         <span class="editor-tab-title" title="${filePath}">${tabData.name}</span>
         <button class="mode-toggle-pill ${tabData.mode}" type="button" title="Click to toggle View/Edit mode">
-          ${tabData.mode === 'view' ? '👁 View' : '✏️ Edit'}
+          ${tabData.mode === 'view' ? 'View' : 'Edit'}
         </button>
         <button class="editor-tab-close" type="button" title="Close tab">×</button>
       `;
