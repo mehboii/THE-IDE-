@@ -14,12 +14,24 @@ const TOOL_SCHEMA = [
 ];
 
 // Tool calls use the same opened-folder root as Explorer and PTY spawning.
-function rootFor(cwd) { return projectRoot.get() || path.resolve(cwd || process.cwd()); }
+function rootFor(cwd) {
+  const pr = projectRoot.get();
+  if (pr) return pr;
+  if (cwd && path.isAbsolute(cwd)) return path.resolve(cwd);
+  throw new Error('No project directory opened. Please open a folder first.');
+}
 function inside(root, target) { return target === root || target.startsWith(`${root}${path.sep}`); }
 function resolvedPath(root, requested = '.') {
-  if (typeof requested !== 'string' || path.isAbsolute(requested)) throw new Error('Path must be relative to the project root.');
-  const target = path.resolve(root, requested);
-  if (!inside(root, target)) throw new Error('Path escapes the project root and was rejected.');
+  if (typeof requested !== 'string') throw new Error('Path must be a string.');
+  let target;
+  if (path.isAbsolute(requested)) {
+    target = path.resolve(requested);
+  } else {
+    target = path.resolve(root, requested);
+  }
+  if (!inside(root, target)) {
+    throw new Error(`Path "${requested}" resolves outside project root "${root}" and was rejected.`);
+  }
   return target;
 }
 async function realPathInside(root, target, allowMissing = false) {
@@ -52,12 +64,14 @@ async function executeTool(name, args, cwd) {
     if (name === 'list_directory') { const dir = resolvedPath(root, args.path || '.'); await realPathInside(root, dir); const entries = await fs.readdir(dir, { withFileTypes: true }); return { ok: true, entries: entries.map((e) => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' })) }; }
     if (name === 'write_file') {
       const file = resolvedPath(root, args.path);
+      console.log(`[FS WRITE ASSERTION] Resolving write path: ${file} against root: ${root}`);
       try { await realPathInside(root, file); } catch (error) { if (error.code !== 'ENOENT') throw error; await realPathInside(root, path.dirname(file), true); }
       await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, String(args.content ?? ''), 'utf8'); return { ok: true, message: `Wrote ${path.relative(root, file)}` };
     }
     if (name === 'run_command') {
       const blocked = destructiveCommand(args.command); if (blocked) return { ok: false, error: blocked };
       const commandCwd = resolvedPath(root, args.cwd || '.'); await realPathInside(root, commandCwd);
+      console.log(`[EXEC ASSERTION] Running command: ${args.command} in cwd: ${commandCwd}`);
       try { const result = await execAsync(String(args.command), { cwd: commandCwd, timeout: 30_000, maxBuffer: 1024 * 1024, shell: '/bin/zsh' }); return { ok: true, stdout: result.stdout, stderr: result.stderr, exitCode: 0 }; }
       catch (error) { return { ok: false, stdout: error.stdout || '', stderr: error.stderr || error.message, exitCode: Number.isInteger(error.code) ? error.code : 1 }; }
     }

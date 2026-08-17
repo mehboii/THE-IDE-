@@ -120,7 +120,11 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
     : { model: model.model, messages, stream: true };
   try {
     // The active opened folder is the sole authority for tool-call scoping.
-    const projectCwd = projectRoot.get() || cwd || process.cwd();
+    const path = require('path');
+    const pr = projectRoot.get();
+    const projectCwd = pr || (cwd && path.isAbsolute(cwd) ? cwd : null);
+    if (!projectCwd) throw new Error('No open project root. Please open a folder before running tool calls.');
+    console.log(`[MODEL CWD ASSERTION] Model tool loop working directory: ${projectCwd}`);
     if (model.type === 'ollama') return await streamOllamaAgent(webContents, paneId, requestId, model, messages, projectCwd, fullAutoApprove, Math.min(Math.max(Number(maxIterations) || 25, 1), 100));
     const response = await request(url, { method: 'POST', headers: headers(model), body: JSON.stringify(body) });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' — check API key' : ''}`);

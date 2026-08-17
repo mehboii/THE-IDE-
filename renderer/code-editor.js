@@ -5,6 +5,9 @@ class CodeEditorManager {
     this.editor = null;
     this.monacoReady = false;
     this.openTabs = new Map(); // filePath -> { filePath, content, mode: 'view'|'edit', model }
+    this.fileBreakpoints = new Map(); // filePath -> Set<lineNumber>
+    this.breakpointDecorations = new Map(); // filePath -> decorationIds[]
+    this.activeLineDecorationId = [];
     this.activeFilePath = null;
     this.fileChangeUnsubscribe = null;
 
@@ -33,9 +36,20 @@ class CodeEditorManager {
       readOnly: true,
       fontSize: 13,
       fontFamily: 'Consolas, "Courier New", monospace',
+      glyphMargin: true,
       minimap: { enabled: true },
       scrollBeyondLastLine: false,
       renderWhitespace: 'selection'
+    });
+
+    // Handle gutter clicks for setting/clearing breakpoints
+    this.editor.onMouseDown((e) => {
+      if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+        const line = e.target.position?.lineNumber;
+        if (line && this.activeFilePath) {
+          this.toggleBreakpoint(this.activeFilePath, line);
+        }
+      }
     });
 
     // Add Ctrl+S / Cmd+S save command to Monaco
@@ -47,6 +61,73 @@ class CodeEditorManager {
     if (this.activeFilePath && this.openTabs.has(this.activeFilePath)) {
       this.switchTab(this.activeFilePath);
     }
+  }
+
+  toggleBreakpoint(filePath, lineNumber) {
+    if (!this.fileBreakpoints.has(filePath)) {
+      this.fileBreakpoints.set(filePath, new Set());
+    }
+    const set = this.fileBreakpoints.get(filePath);
+    if (set.has(lineNumber)) {
+      set.delete(lineNumber);
+    } else {
+      set.add(lineNumber);
+    }
+    this.updateBreakpointDecorations(filePath);
+  }
+
+  getBreakpoints(filePath) {
+    const set = this.fileBreakpoints.get(filePath);
+    return set ? Array.from(set) : [];
+  }
+
+  updateBreakpointDecorations(filePath) {
+    if (!this.editor || !window.monaco) return;
+    const tabData = this.openTabs.get(filePath);
+    if (!tabData || !tabData.model) return;
+
+    const set = this.fileBreakpoints.get(filePath) || new Set();
+    const newDecorations = Array.from(set).map(line => ({
+      range: new monaco.Range(line, 1, line, 1),
+      options: {
+        isWholeLine: false,
+        glyphMarginClassName: 'monaco-breakpoint-glyph'
+      }
+    }));
+
+    const oldDecs = this.breakpointDecorations.get(filePath) || [];
+    const updatedDecs = tabData.model.deltaDecorations(oldDecs, newDecorations);
+    this.breakpointDecorations.set(filePath, updatedDecs);
+  }
+
+  highlightPausedLine(filePath, lineNumber) {
+    this.clearPausedLine();
+    if (!this.editor || !window.monaco) return;
+    const tabData = this.openTabs.get(filePath);
+    if (!tabData || !tabData.model) return;
+
+    this.activeLineDecorationId = tabData.model.deltaDecorations([], [{
+      range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+      options: {
+        isWholeLine: true,
+        className: 'monaco-debug-active-line'
+      }
+    }]);
+
+    if (this.activeFilePath === filePath) {
+      this.editor.revealLineInCenter(lineNumber);
+    }
+  }
+
+  clearPausedLine() {
+    if (!this.editor || !window.monaco || this.activeLineDecorationId.length === 0) return;
+    if (this.activeFilePath) {
+      const tabData = this.openTabs.get(this.activeFilePath);
+      if (tabData && tabData.model) {
+        tabData.model.deltaDecorations(this.activeLineDecorationId, []);
+      }
+    }
+    this.activeLineDecorationId = [];
   }
 
   setupFileWatcherListener() {
@@ -158,6 +239,7 @@ class CodeEditorManager {
       if (tabData.model) {
         this.editor.setModel(tabData.model);
         this.editor.updateOptions({ readOnly: tabData.mode === 'view' });
+        this.updateBreakpointDecorations(filePath);
       }
     }
   }

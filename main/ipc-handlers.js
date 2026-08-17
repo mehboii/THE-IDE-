@@ -166,14 +166,23 @@ function registerIpcHandlers({ openEditorFile } = {}) {
     }
   };
 
+  function resolveFsPath(targetPath) {
+    if (!targetPath) return targetPath;
+    if (path.isAbsolute(targetPath)) return targetPath;
+    const pr = projectRoot.get();
+    if (pr) return path.resolve(pr, targetPath);
+    return path.resolve(targetPath);
+  }
+
   ipcMain.handle('fs:read-dir', async (event, dirPath) => {
     try {
-      if (!dirPath || !fs.existsSync(dirPath)) return [];
-      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+      const target = resolveFsPath(dirPath);
+      if (!target || !fs.existsSync(target)) return [];
+      const entries = await fs.promises.readdir(target, { withFileTypes: true });
       const results = entries.map(entry => ({
         name: entry.name,
         isDirectory: entry.isDirectory(),
-        path: path.join(dirPath, entry.name)
+        path: path.join(target, entry.name)
       }));
 
       // Sort directories first, then files alphabetically
@@ -192,7 +201,8 @@ function registerIpcHandlers({ openEditorFile } = {}) {
 
   ipcMain.handle('fs:read-file', async (event, filePath) => {
     try {
-      const content = await fs.promises.readFile(filePath, 'utf8');
+      const target = resolveFsPath(filePath);
+      const content = await fs.promises.readFile(target, 'utf8');
       return { success: true, content };
     } catch (err) {
       return { success: false, error: err.message };
@@ -201,7 +211,10 @@ function registerIpcHandlers({ openEditorFile } = {}) {
 
   ipcMain.handle('fs:write-file', async (event, { filePath, content }) => {
     try {
-      await fs.promises.writeFile(filePath, content, 'utf8');
+      const target = resolveFsPath(filePath);
+      console.log(`[FS WRITE ASSERTION] IPC fs:write-file writing to path: ${target}`);
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      await fs.promises.writeFile(target, content, 'utf8');
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -243,6 +256,12 @@ function registerIpcHandlers({ openEditorFile } = {}) {
     }
     return true;
   });
+
+  // Runner & Debugger IPC handlers
+  const runner = require('./runner');
+  ipcMain.handle('runner:execute', (event, payload) => runner.execute(event.sender, payload));
+  ipcMain.handle('runner:stop', (event, runId) => runner.stop(runId));
+  ipcMain.handle('runner:debug-command', (event, { runId, command }) => runner.sendDebugCommand(runId, command));
 }
 
 module.exports = { registerIpcHandlers };
