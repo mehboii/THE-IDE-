@@ -107,9 +107,7 @@ class AppController {
     this.fileExplorer.onFileSelect((filePath) => {
       window.electronAPI.openEditorFile(filePath);
     });
-    this.fileExplorer.onRootChange(async (dirPath) => {
-      await window.electronAPI.setProjectRoot(dirPath);
-    });
+    this.fileExplorer.onRootChange((dirPath) => window.electronAPI.setProjectRoot(dirPath));
 
     // Restore the explorer as a view of the authoritative main-process root.
     const projectRoot = await window.electronAPI.getProjectRoot();
@@ -209,9 +207,8 @@ class AppController {
 
       if (customModel) return this.createCustomModelPane({ id: paneId, label, customModel, cwd });
       const agentObj = this.agentsList.find((a) => a.id === agentId) || this.agentsList.find((a) => a.id === 'shell') || this.agentsList[0];
-      // Explicit cwd is a per-pane override (restored workspace / pane picker).
-      // Otherwise take a fresh snapshot of the authoritative project root.
-      const initialCwd = cwd || await window.electronAPI.getProjectRoot() || '';
+      // An open Explorer folder is authoritative for every new process.
+      const initialCwd = await window.electronAPI.getProjectRoot() || cwd || '';
 
       const pane = new TerminalPane({
         id: paneId,
@@ -280,13 +277,12 @@ class AppController {
   }
 
   async createCustomModelPane({ id, label, customModel, cwd }) {
-    // A chat pane snapshots the project root at creation, matching terminal
-    // behavior. Later Open Folder calls do not move existing panes.
-    const initialCwd = cwd || await window.electronAPI.getProjectRoot() || '';
+    // An open Explorer folder is authoritative for every new chat/tool pane.
+    const initialCwd = await window.electronAPI.getProjectRoot() || cwd || '';
     const pane = new CustomModelPane({ id, label: label || customModel.name, model: customModel, cwd: initialCwd,
       onFocus: (pId) => this.focusPane(pId), onClose: (pId) => this.removePane(pId),
       onRestart: (pId) => this.restartPane(pId), onKill: (pId) => this.killPaneSession(pId),
-      onCwdChange: (pId, newCwd) => { this.panes.get(pId)?.setCwd(newCwd); },
+      onCwdChange: (pId, newCwd) => this.changePaneCwd(pId, newCwd),
       onLabelChange: () => { this.renderEditorTabs(); this.renderSidebarSessions(); },
       onStatusChange: () => { this.renderEditorTabs(); this.renderSidebarSessions(); } });
     await pane.init(); this.panes.set(id, pane); this.gridManager.addPaneToGrid(pane); this.focusPane(id);
@@ -337,7 +333,7 @@ class AppController {
       if (killTmux) {
         await window.electronAPI.destroyPty(paneId, true);
       }
-      await window.electronAPI.restartPty({
+      const result = await window.electronAPI.restartPty({
         paneId,
         cwd: pane.cwd,
         agentCommand: agentObj ? agentObj.command : '',
@@ -345,6 +341,7 @@ class AppController {
         cols: dims.cols,
         rows: dims.rows
       });
+      if (result?.cwd) pane.setCwd(result.cwd);
       pane.setStatus('running');
       // Refit after restart so PTY gets correct size
       requestAnimationFrame(() => pane.fit());
@@ -377,8 +374,13 @@ class AppController {
   }
 
   async changePaneCwd(paneId, newCwd) {
-    const pane = this.panes.get(paneId);
-    if (pane) pane.setCwd(newCwd);
+    // The pane folder picker changes the shared opened folder; it does not
+    // introduce a second, hidden execution root for one pane.
+    if (newCwd && this.fileExplorer) {
+      await this.fileExplorer.setRootDirectory(newCwd, true);
+      const canonicalRoot = await window.electronAPI.getProjectRoot();
+      this.panes.get(paneId)?.setCwd(canonicalRoot || '');
+    }
     await this.restartPane(paneId, { killTmux: true });
   }
 

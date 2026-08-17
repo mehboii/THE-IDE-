@@ -119,9 +119,8 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
     ? { model: model.model, messages, stream: true }
     : { model: model.model, messages, stream: true };
   try {
-    // Capture the root when this request begins. Existing chat panes keep their
-    // own cwd after a later Open Folder, just like an already-running shell.
-    const projectCwd = cwd || projectRoot.get() || process.cwd();
+    // The active opened folder is the sole authority for tool-call scoping.
+    const projectCwd = projectRoot.get() || cwd || process.cwd();
     if (model.type === 'ollama') return await streamOllamaAgent(webContents, paneId, requestId, model, messages, projectCwd, fullAutoApprove, Math.min(Math.max(Number(maxIterations) || 25, 1), 100));
     const response = await request(url, { method: 'POST', headers: headers(model), body: JSON.stringify(body) });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' — check API key' : ''}`);
