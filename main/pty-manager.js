@@ -38,10 +38,13 @@ class PtyManager {
 
     // Once a folder is open, it is the sole cwd authority for every spawn.
     // Renderer pane state cannot override the Explorer's project root.
-    const requestedCwd = projectRoot.get() || cwd;
-    const safeCwd = requestedCwd && fs.existsSync(requestedCwd) && fs.statSync(requestedCwd).isDirectory()
-      ? fs.realpathSync(requestedCwd)
+    const path = require('path');
+    const pr = projectRoot.get();
+    const candidateCwd = pr || (cwd && path.isAbsolute(cwd) ? cwd : cwd);
+    const safeCwd = candidateCwd && fs.existsSync(candidateCwd) && fs.statSync(candidateCwd).isDirectory()
+      ? fs.realpathSync(candidateCwd)
       : process.cwd();
+    console.log(`[PTY CWD ASSERTION] Spawning PTY session ${paneId} with safeCwd: ${safeCwd} (projectRoot: ${pr || 'none'})`);
     const tmux = await this.checkTmuxAvailable();
 
     // Fallback mode when tmux is not installed / not on PATH
