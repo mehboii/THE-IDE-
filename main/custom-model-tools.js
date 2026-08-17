@@ -51,10 +51,10 @@ function destructiveCommand(command) {
   return null;
 }
 function title(name, args) {
-  if (name === 'read_file') return `📖 Reading ${args.path}`;
-  if (name === 'write_file') return `✍️ Writing ${args.path}`;
-  if (name === 'list_directory') return `📁 Listing ${args.path || '.'}`;
-  return `▶ Running ${args.command}`;
+  if (name === 'read_file') return `Reading ${args.path}`;
+  if (name === 'write_file') return `Writing ${args.path}`;
+  if (name === 'list_directory') return `Listing ${args.path || '.'}`;
+  return `Running ${args.command}`;
 }
 async function executeTool(name, args, cwd) {
   const root = rootFor(cwd);

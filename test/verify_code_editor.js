@@ -28,11 +28,11 @@ const testFile = path.join(root, 'test', 'temp_demo_file.js');
 
     if (!page) throw new Error('Could not find renderer window index.html');
     await page.waitForLoadState('domcontentloaded');
-    console.log('✔ App launched & renderer window connected.');
+    console.log('PASS App launched & renderer window connected.');
 
     // Wait for AppController initialization
     await page.waitForFunction(() => window.appInstance && window.appInstance.codeEditorManager, { timeout: 10000 });
-    console.log('✔ AppController, FileExplorer, and CodeEditorManager initialized.');
+    console.log('PASS AppController, FileExplorer, and CodeEditorManager initialized.');
 
     // 1. Verification Item 1: File Tree Rendering & Working Directory Sync
     console.log('\n--- Item 1: File Tree & Working Directory Sync ---');
@@ -146,11 +146,11 @@ const testFile = path.join(root, 'test', 'temp_demo_file.js');
     console.log('PASS: View mode layout toggles work cleanly and persist to localStorage.');
 
     console.log('\n==================================================');
-    console.log('✔ ALL 6 CODE EDITOR VERIFICATION CHECKS PASSED!');
+    console.log('PASS ALL 6 CODE EDITOR VERIFICATION CHECKS PASSED!');
     console.log('==================================================\n');
 
   } catch (err) {
-    console.error('\n❌ VERIFICATION FAILED:', err);
+    console.error('\nFAIL VERIFICATION FAILED:', err);
     process.exitCode = 1;
   } finally {
     if (fs.existsSync(testFile)) {

@@ -30,10 +30,10 @@ const saveAsTestFile = path.join(root, 'test', 'temp_saveas_test.js');
 
     if (!page) throw new Error('Could not find renderer window index.html');
     await page.waitForLoadState('domcontentloaded');
-    console.log('✔ App launched & renderer connected.');
+    console.log('PASS App launched & renderer connected.');
 
     await page.waitForFunction(() => window.appInstance && window.appInstance.codeEditorManager, { timeout: 10000 });
-    console.log('✔ AppController, FileExplorer, and CodeEditorManager initialized.');
+    console.log('PASS AppController, FileExplorer, and CodeEditorManager initialized.');
 
     // ------------------------------------------------------------------------
     // Verification 1: Open 5 real files from disk, check genuine content & syntax language
@@ -62,7 +62,7 @@ const saveAsTestFile = path.join(root, 'test', 'temp_saveas_test.js');
 
       assert.strictEqual(loadedContent, expectedDisk, `Content for ${f.rel} must match disk content exactly`);
       assert.strictEqual(detectedLang, f.lang, `Language for ${f.rel} must be ${f.lang}`);
-      console.log(`  ✔ Verified genuine disk content & language (${detectedLang}) for: ${f.rel}`);
+      console.log(`  PASS Verified genuine disk content & language (${detectedLang}) for: ${f.rel}`);
     }
     console.log('PASS: 5 real files loaded genuine disk content with correct syntax language models.');
 
@@ -181,11 +181,11 @@ const saveAsTestFile = path.join(root, 'test', 'temp_saveas_test.js');
     console.log('PASS: All terminal panes, PTY processes, and scrollbacks remained intact without teardown across view mode switches.');
 
     console.log('\n==================================================');
-    console.log('✔ ALL 5 BUG FIX VERIFICATION TESTS PASSED!');
+    console.log('PASS ALL 5 BUG FIX VERIFICATION TESTS PASSED!');
     console.log('==================================================\n');
 
   } catch (err) {
-    console.error('\n❌ VERIFICATION FAILED:', err);
+    console.error('\nFAIL VERIFICATION FAILED:', err);
     process.exitCode = 1;
   } finally {
     if (fs.existsSync(editTestFile)) try { fs.unlinkSync(editTestFile); } catch (_) {}
