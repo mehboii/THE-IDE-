@@ -1,6 +1,6 @@
 # Agent Terminal IDE
 
-> **Desktop Terminal IDE for launching, managing, and multiplexing multiple CLI coding agents (Claude Code, Codex CLI, Aider) in a high-performance grid layout only available for macOS the future release may support the windows version and linux version to.**
+> **Desktop Terminal IDE for launching, managing, and multiplexing multiple CLI coding agents (Claude Code, Codex CLI, Aider) in a high-performance grid layout for Windows, macOS, and Linux.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Electron](https://img.shields.io/badge/Electron-31.2.0-blue)
@@ -143,16 +143,36 @@ Agent presets can also be saved in your user data directory (`<userData>/user_ag
 
 ## Building & Packaging for Linux
 
-The project is pre-configured with `electron-builder` to package Linux distribution targets (**AppImage** and **.deb**).
+The Linux release is an **x64 AppImage**, a self-contained executable that works across mainstream Linux distributions (Ubuntu, Debian, Fedora, Arch, Mint, openSUSE, and others). It must be built on Linux so the native `node-pty` dependency is compiled for Linux; use the included GitHub Actions workflow for builds from Windows or macOS.
 
 ```bash
-# Build production AppImage and deb packages for Linux
+# Build the portable Linux AppImage from a Linux machine
 npm run dist
 ```
 
-The output installers will be generated in the `./dist/` directory:
-- `dist/Agent Terminal IDE-1.0.0.AppImage`
-- `dist/agent-terminal-ide_1.0.0_amd64.deb`
+The output will be generated in the `./dist/` directory:
+- `dist/agent-terminal-ide-1.0.3-x64.AppImage`
+
+On GitHub, run the **Build Linux AppImage** workflow manually or push a version tag. A tag such as `v1.0.3` also creates a GitHub Release with the AppImage attached, so users can download the latest release with the GitHub CLI:
+
+```bash
+gh release download --repo mehboii/THE-IDE- --pattern '*.AppImage'
+```
+
+To download a particular version, replace `v1.0.3` below with its release tag:
+
+```bash
+gh release download v1.0.3 --repo mehboii/THE-IDE- --pattern '*.AppImage'
+```
+
+Manual workflow runs provide the `linux-appimage-x64` Actions artifact instead. On the target machine:
+
+```bash
+chmod +x agent-terminal-ide-*-x64.AppImage
+./agent-terminal-ide-*-x64.AppImage
+```
+
+The target machine still needs `tmux` installed for persistent terminal sessions. On distributions with FUSE 2 unavailable, AppImages can be launched with `APPIMAGE_EXTRACT_AND_RUN=1 ./agent-terminal-ide-*-x64.AppImage`.
 
 ### macOS package
 
@@ -161,6 +181,22 @@ npm run dist:mac
 ```
 
 This creates a `.dmg` and `.zip` in `dist/`. Local unsigned builds may trigger Gatekeeper when opened on another Mac; signing and notarization require your Apple Developer certificate and credentials and are intentionally not configured in this repository.
+
+### Windows installer
+
+Windows uses the built-in terminal fallback (PowerShell); `tmux` persistence is
+not required or used on Windows. From a Windows machine, build a 64-bit NSIS
+installer with:
+
+```powershell
+npm install
+npm run dist:win
+```
+
+The installable executable is written to `dist/Agent Terminal IDE-<version>-Setup.exe`.
+It lets the user choose an installation folder and creates Start Menu and desktop shortcuts.
+Windows SmartScreen may show a warning for this unsigned build. Code signing is
+needed before distributing the installer broadly.
 
 ---
 

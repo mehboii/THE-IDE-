@@ -49,22 +49,26 @@ class PtyManager {
 
     // Fallback mode when tmux is not installed / not on PATH
     if (!tmux.available) {
-      const shell = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/sh');
-      const args = [];
-      if (agentCommand.trim()) {
-        args.push('-lc', `${agentCommand}; exec "${shell}" -l`);
-      } else {
-        args.push('-l');
-      }
+      const isWindows = process.platform === 'win32';
+      const shell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/sh');
+      // PowerShell/cmd do not support the POSIX `-lc` and `-l` flags. Keep
+      // the agent command interactive on Windows, then leave the shell open.
+      const args = isWindows
+        ? (agentCommand.trim()
+          ? ['/NoLogo', '-NoExit', '-Command', agentCommand]
+          : ['/NoLogo', '-NoExit'])
+        : (agentCommand.trim()
+          ? ['-lc', `${agentCommand}; exec "${shell}" -l`]
+          : ['-l']);
 
       let ptyProcess;
       try {
         ptyProcess = spawn(shell, args, {
-          name: 'xterm-256color',
+          name: isWindows ? 'xterm' : 'xterm-256color',
           cols: Math.max(2, cols),
           rows: Math.max(2, rows),
           cwd: safeCwd,
-          env: { ...process.env, ...envVars, TERM: 'xterm-256color' }
+          env: { ...process.env, ...envVars, ...(isWindows ? {} : { TERM: 'xterm-256color' }) }
         });
       } catch (err) {
         throw new Error(`Failed to spawn fallback PTY for ${paneId}: ${err.message}`);
