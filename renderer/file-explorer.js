@@ -1,3 +1,21 @@
+// Compact, Seti-inspired labels rather than copied icon assets.  Keeping this
+// as data makes it easy to extend while leaving the tree data and IPC untouched.
+const FILE_ICON_MAP = {
+  js: { label: 'JS', color: 'yellow' }, jsx: { label: 'JS', color: 'yellow' }, mjs: { label: 'JS', color: 'yellow' }, cjs: { label: 'JS', color: 'yellow' },
+  ts: { label: 'TS', color: 'blue' }, tsx: { label: 'TS', color: 'blue' },
+  json: { label: '{}', color: 'yellow' }, jsonc: { label: '{}', color: 'yellow' },
+  html: { label: '<>', color: 'orange' }, htm: { label: '<>', color: 'orange' }, xml: { label: '<>', color: 'orange' },
+  css: { label: '#', color: 'blue' }, scss: { label: '#', color: 'pink' }, sass: { label: '#', color: 'pink' }, less: { label: '#', color: 'blue' },
+  md: { label: 'M', color: 'blue' }, markdown: { label: 'M', color: 'blue' }, mdx: { label: 'M', color: 'blue' },
+  py: { label: 'PY', color: 'blue' }, pyw: { label: 'PY', color: 'blue' },
+  yml: { label: 'Y', color: 'red' }, yaml: { label: 'Y', color: 'red' },
+  toml: { label: 'T', color: 'red' }, env: { label: 'E', color: 'green' },
+  sh: { label: '$', color: 'green' }, bash: { label: '$', color: 'green' }, zsh: { label: '$', color: 'green' },
+  sql: { label: 'SQL', color: 'pink' },
+  png: { label: '◈', color: 'purple' }, jpg: { label: '◈', color: 'purple' }, jpeg: { label: '◈', color: 'purple' }, gif: { label: '◈', color: 'purple' }, svg: { label: '◈', color: 'yellow' },
+  lock: { label: '•', color: 'muted' }, txt: { label: '≡', color: 'muted' },
+};
+
 class FileExplorer {
   constructor(containerEl, openFolderBtnEl) {
     this.containerEl = containerEl;
@@ -6,6 +24,7 @@ class FileExplorer {
     this.onFileSelectCallback = null;
     this.onRootChangeCallback = null;
     this.expandedDirs = new Set();
+    this.selectedFilePath = null;
     this.watchedRootDir = null;
     this.unsubscribeFileChanges = window.electronAPI.onFileChanged(({ filePath }) => {
       // The main process watches the open root. A rerender keeps the Explorer
@@ -75,7 +94,8 @@ class FileExplorer {
     header.setAttribute('aria-expanded', String(this.expandedDirs.has(this.currentRootDir)));
     const folderName = this.currentRootDir.split(/[/\\]/).pop() || this.currentRootDir;
     header.innerHTML = `
-      <span class="tree-icon">${this.expandedDirs.has(this.currentRootDir) ? 'v' : '>'}</span>
+      <span class="tree-chevron ${this.expandedDirs.has(this.currentRootDir) ? 'is-expanded' : ''}" aria-hidden="true"></span>
+      <span class="file-icon folder-icon ${this.expandedDirs.has(this.currentRootDir) ? 'is-open' : ''}" aria-hidden="true"></span>
       <span class="file-tree-root-title" title="${this.currentRootDir}"><strong>${folderName}</strong></span>
     `;
     const toggleRoot = async () => {
@@ -113,17 +133,23 @@ class FileExplorer {
       return;
     }
 
-    for (const entry of entries) {
+    const sortedEntries = [...entries].sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    for (const entry of sortedEntries) {
       const itemEl = document.createElement('div');
-      itemEl.className = `tree-item ${entry.isDirectory ? 'folder' : 'file'}`;
+      const isExpanded = entry.isDirectory && this.expandedDirs.has(entry.path);
+      itemEl.className = `tree-item ${entry.isDirectory ? 'folder' : 'file'}${this.selectedFilePath === entry.path ? ' selected' : ''}`;
       itemEl.style.paddingLeft = `${depth * 14 + 8}px`;
 
-      const icon = entry.isDirectory
-        ? (this.expandedDirs.has(entry.path) ? 'v' : '>')
-        : this.getFileIcon(entry.name);
+      const icon = entry.isDirectory ? null : this.getFileIcon(entry.name);
 
       itemEl.innerHTML = `
-        <span class="tree-icon">${icon}</span>
+        ${entry.isDirectory
+          ? `<span class="tree-chevron ${isExpanded ? 'is-expanded' : ''}" aria-hidden="true"></span><span class="file-icon folder-icon ${isExpanded ? 'is-open' : ''}" aria-hidden="true"></span>`
+          : `<span class="file-icon file-icon-${icon.color}" aria-hidden="true">${icon.label}</span>`}
         <span class="tree-label" title="${entry.path}">${entry.name}</span>
       `;
 
@@ -142,11 +168,13 @@ class FileExplorer {
           if (this.expandedDirs.has(entry.path)) {
             this.expandedDirs.delete(entry.path);
             childContainer.style.display = 'none';
-            itemEl.querySelector('.tree-icon').textContent = '>';
+            itemEl.querySelector('.tree-chevron').classList.remove('is-expanded');
+            itemEl.querySelector('.folder-icon').classList.remove('is-open');
           } else {
             this.expandedDirs.add(entry.path);
             childContainer.style.display = 'block';
-            itemEl.querySelector('.tree-icon').textContent = 'v';
+            itemEl.querySelector('.tree-chevron').classList.add('is-expanded');
+            itemEl.querySelector('.folder-icon').classList.add('is-open');
             if (childContainer.children.length === 0) {
               await this.populateDirNode(entry.path, childContainer, depth + 1);
             }
@@ -159,6 +187,7 @@ class FileExplorer {
       } else {
         itemEl.addEventListener('click', (e) => {
           e.stopPropagation();
+          this.selectedFilePath = entry.path;
           this.containerEl.querySelectorAll('.tree-item.file').forEach(el => el.classList.remove('selected'));
           itemEl.classList.add('selected');
           if (this.onFileSelectCallback) {
@@ -170,18 +199,11 @@ class FileExplorer {
   }
 
   getFileIcon(filename) {
-    const ext = filename.split('.').pop().toLowerCase();
-    switch (ext) {
-      case 'js': case 'jsx': case 'mjs': return 'JS';
-      case 'ts': case 'tsx': return 'TS';
-      case 'py': case 'pyw': return 'PY';
-      case 'json': return '{}';
-      case 'md': return 'MD';
-      case 'html': return '<>';
-      case 'css': case 'scss': case 'less': return '#';
-      case 'sh': case 'bash': case 'zsh': return '>';
-      default: return '-';
-    }
+    const normalizedName = filename.toLowerCase();
+    if (normalizedName === '.gitignore') return { label: 'G', color: 'orange' };
+    if (normalizedName === 'dockerfile') return { label: 'D', color: 'blue' };
+    const ext = normalizedName.includes('.') ? normalizedName.split('.').pop() : '';
+    return FILE_ICON_MAP[ext] || { label: '•', color: 'muted' };
   }
 }
 

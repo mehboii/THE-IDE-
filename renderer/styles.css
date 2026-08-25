@@ -1354,13 +1354,17 @@ kbd {
 }
 
 .file-tree-root-header {
-  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
   font-size: 11px;
   color: var(--vscode-sideBarTitle-foreground);
-  border-bottom: 1px solid rgba(255,255,255,0.05);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
 }
 
 .file-tree-list {
@@ -1368,37 +1372,89 @@ kbd {
   flex-direction: column;
   font-size: 12px;
   user-select: none;
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
-.tree-item {
+.file-tree-list .tree-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   height: 22px;
+  min-width: 0;
   padding-right: 8px;
   cursor: pointer;
-  color: #cccccc;
+  color: var(--vscode-sideBar-foreground);
   white-space: nowrap;
+  border-left: 2px solid transparent;
 }
-.tree-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+.file-tree-list .tree-item:hover, .file-tree-root-header:hover {
+  background: var(--vscode-list-hoverBackground);
   color: #ffffff;
 }
-.tree-item.selected {
-  background: #04395e;
+.file-tree-list .tree-item.selected {
+  background: var(--vscode-list-activeSelectionBackground);
   color: #ffffff;
+  border-left-color: var(--color-accent);
 }
-.tree-item.empty {
+.file-tree-list .tree-item.empty {
   color: var(--text-muted);
   font-style: italic;
   cursor: default;
 }
-.tree-icon {
-  font-size: 12px;
+.tree-chevron {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  position: relative;
+}
+.tree-chevron::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 100ms ease;
+}
+.tree-chevron.is-expanded::before { transform: rotate(45deg); top: 2px; }
+.file-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
   line-height: 1;
 }
+.folder-icon { position: relative; width: 16px; height: 13px; margin-top: 1px; color: #dcb67a; }
+.folder-icon::before { content: ''; position: absolute; top: 3px; left: 1px; width: 14px; height: 9px; border-radius: 1px; background: currentColor; opacity: .92; }
+.folder-icon::after { content: ''; position: absolute; top: 1px; left: 2px; width: 7px; height: 4px; border-radius: 1px 1px 0 0; background: currentColor; }
+.folder-icon.is-open { color: #e8c47f; }
+.folder-icon.is-open::before { width: 15px; transform: skewX(-12deg) translateY(1px); transform-origin: left bottom; }
+.folder-icon.is-open::after { width: 8px; }
+.file-icon-yellow { color: #dcdcaa; }
+.file-icon-blue { color: #519aba; }
+.file-icon-orange { color: #e37933; }
+.file-icon-pink { color: #f55385; }
+.file-icon-green { color: #89d185; }
+.file-icon-red { color: #cb7676; }
+.file-icon-purple { color: #c586c0; }
+.file-icon-muted { color: var(--text-muted); }
+.file-tree-root-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .tree-label {
+  min-width: 0;
+  flex: 1;
+}
+.file-tree-list .tree-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
