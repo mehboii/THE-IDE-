@@ -31,12 +31,36 @@ async function waitForBuffer(page, paneId, text) {
     if (found) return; await sleep(100);
   } throw new Error(`Terminal output did not contain ${text}`);
 }
+async function verifyLiveCustomEndpoint(page) {
+  const endpoint = process.env.CUSTOM_MODEL_TEST_URL;
+  if (!endpoint) {
+    console.log('SKIP custom endpoint integration: CUSTOM_MODEL_TEST_URL is not configured.');
+    return;
+  }
+  const parsed = new URL(endpoint);
+  if (!['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)) throw new Error('CUSTOM_MODEL_TEST_URL must point to a loopback test endpoint.');
+  const type = process.env.CUSTOM_MODEL_TEST_TYPE === 'ollama' ? 'ollama' : 'openai';
+  const model = {
+    id: 'smoke-live-custom-model', name: 'Live endpoint smoke test', host: endpoint.replace(/\/$/, ''), port: '', type,
+    model: process.env.CUSTOM_MODEL_TEST_MODEL || 'test-model', apiKey: process.env.CUSTOM_MODEL_TEST_API_KEY || ''
+  };
+  const connection = await page.evaluate((configured) => window.electronAPI.testCustomModel(configured), model);
+  if (!connection.success) throw new Error(`Custom endpoint connection failed: ${connection.error}`);
+  await page.evaluate((configured) => window.appInstance.createPane({ id: 'smoke-live-custom-model', customModel: configured }), model);
+  const pane = page.locator('[data-pane-id="smoke-live-custom-model"]');
+  await pane.locator('textarea').fill(process.env.CUSTOM_MODEL_TEST_PROMPT || 'Reply with a short smoke-test acknowledgement.');
+  await pane.locator('.chat-composer button').click();
+  await pane.locator('.chat-message.assistant:not(:empty)').waitFor({ timeout: 20_000 });
+  console.log('PASS live custom endpoint response rendered in a custom model pane');
+  await page.evaluate(() => window.appInstance.removePane('smoke-live-custom-model'));
+}
 (async () => {
   try { execFileSync('tmux', ['kill-server'], { stdio: 'ignore' }); } catch (_) {}
   let run = await launch();
   const paneCount = await run.page.locator('.terminal-pane').count();
   if (paneCount !== 4) throw new Error(`Expected 4 default panes, received ${paneCount}`);
   console.log(`PASS grid rendered ${paneCount} panes`);
+  await verifyLiveCustomEndpoint(run.page);
   await run.page.evaluate(() => window.appInstance.createPane({ id: 'smoke-pty', label: 'Smoke PTY', agentId: 'shell' }));
   await run.page.evaluate(() => window.electronAPI.writePty('smoke-pty', 'echo hello-sandbox-test\r'));
   await waitForBuffer(run.page, 'smoke-pty', marker); console.log('PASS node-pty command output reached xterm buffer');
