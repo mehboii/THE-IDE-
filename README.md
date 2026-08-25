@@ -1,4 +1,4 @@
-# Agent Terminal IDE
+# Agent Terminal IDE.
 
 > **Desktop Terminal IDE for launching, managing, and multiplexing multiple CLI coding agents (Claude Code, Codex CLI, Aider) in a high-performance grid layout for Windows, macOS, and Linux.**
 
