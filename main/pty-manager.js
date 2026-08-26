@@ -1,6 +1,5 @@
 const { spawn } = require('node-pty');
 const { execFile } = require('child_process');
-const fs = require('fs');
 const projectRoot = require('./project-root');
 
 const TMUX_PREFIX = 'ide-';
@@ -38,25 +37,24 @@ class PtyManager {
 
     // Once a folder is open, it is the sole cwd authority for every spawn.
     // Renderer pane state cannot override the Explorer's project root.
-    const path = require('path');
-    const pr = projectRoot.get();
-    const candidateCwd = pr || (cwd && path.isAbsolute(cwd) ? cwd : cwd);
-    const safeCwd = candidateCwd && fs.existsSync(candidateCwd) && fs.statSync(candidateCwd).isDirectory()
-      ? fs.realpathSync(candidateCwd)
-      : process.cwd();
-    console.log(`[PTY CWD ASSERTION] Spawning PTY session ${paneId} with safeCwd: ${safeCwd} (projectRoot: ${pr || 'none'})`);
+    const safeCwd = projectRoot.resolveWorkingDirectory(cwd, `PTY session ${paneId}`);
+    console.log(`[PTY CWD ASSERTION] Spawning PTY session ${paneId} with cwd: ${JSON.stringify(safeCwd)} (projectRoot: ${JSON.stringify(projectRoot.get())})`);
     const tmux = await this.checkTmuxAvailable();
 
     // Fallback mode when tmux is not installed / not on PATH
     if (!tmux.available) {
       const isWindows = process.platform === 'win32';
       const shell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/sh');
+      // node-pty's cwd is not consistently applied by Windows PowerShell
+      // (it can start at System32). Establish the canonical cwd in PowerShell
+      // itself as well, using -LiteralPath so spaces and [] are never parsed.
+      const powerShellCwdCommand = `Set-Location -LiteralPath '${safeCwd.replace(/'/g, "''")}'`;
       // PowerShell/cmd do not support the POSIX `-lc` and `-l` flags. Keep
       // the agent command interactive on Windows, then leave the shell open.
       const args = isWindows
-        ? (agentCommand.trim()
-          ? ['/NoLogo', '-NoExit', '-Command', agentCommand]
-          : ['/NoLogo', '-NoExit'])
+        ? ['/NoLogo', '-NoExit', '-Command', agentCommand.trim()
+          ? `${powerShellCwdCommand}; ${agentCommand}`
+          : powerShellCwdCommand]
         : (agentCommand.trim()
           ? ['-lc', `${agentCommand}; exec "${shell}" -l`]
           : ['-l']);

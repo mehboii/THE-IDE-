@@ -135,10 +135,7 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
     // Only tool-enabled Ollama requests need a project root. Plain chat must
     // remain usable before a folder is opened, just like OpenAI-compatible chat.
     if (agentic) {
-      const path = require('path');
-      const pr = projectRoot.get();
-      const projectCwd = pr || (cwd && path.isAbsolute(cwd) ? cwd : null);
-      if (!projectCwd) throw new Error('No open project root. Please open a folder before running tool calls.');
+      const projectCwd = projectRoot.resolveWorkingDirectory(cwd, 'model tool loop');
       console.log(`[MODEL CWD ASSERTION] Model tool loop working directory: ${projectCwd}`);
       return await streamOllamaAgent(webContents, paneId, requestId, model, messages, projectCwd, fullAutoApprove, Math.min(Math.max(Number(maxIterations) || 25, 1), 100));
     }
