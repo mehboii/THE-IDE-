@@ -25,10 +25,8 @@ class RunnerManager {
   }
 
   getWorkingDir(filePath) {
-    const pr = projectRoot.get();
-    if (pr) return pr;
-    if (filePath && path.isAbsolute(filePath)) return path.dirname(filePath);
-    return process.cwd();
+    const candidate = filePath && path.isAbsolute(filePath) ? path.dirname(filePath) : null;
+    return projectRoot.resolveWorkingDirectory(candidate, 'Run/Debug process');
   }
 
   async execute(webContents, { filePath, mode = 'run', breakpoints = [] }) {
@@ -37,7 +35,12 @@ class RunnerManager {
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    const cwd = this.getWorkingDir(filePath);
+    let cwd;
+    try {
+      cwd = this.getWorkingDir(filePath);
+    } catch (error) {
+      return { success: false, message: error.message };
+    }
     const fileName = path.basename(filePath);
 
     // 1. HTML -> Open in default browser

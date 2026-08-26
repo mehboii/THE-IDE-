@@ -15,10 +15,7 @@ const TOOL_SCHEMA = [
 
 // Tool calls use the same opened-folder root as Explorer and PTY spawning.
 function rootFor(cwd) {
-  const pr = projectRoot.get();
-  if (pr) return pr;
-  if (cwd && path.isAbsolute(cwd)) return path.resolve(cwd);
-  throw new Error('No project directory opened. Please open a folder first.');
+  return projectRoot.resolveWorkingDirectory(cwd, 'model tool');
 }
 function inside(root, target) { return target === root || target.startsWith(`${root}${path.sep}`); }
 function resolvedPath(root, requested = '.') {

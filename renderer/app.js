@@ -756,16 +756,15 @@ class AppController {
       // target is a default pane that was created before Open Folder. This
       // uses the same main-process root resolution as ordinary new panes.
       const projectRoot = await window.electronAPI.getProjectRoot();
-      const launchCwd = projectRoot || pane.cwd;
-      if (launchCwd && pane.cwd !== launchCwd) {
-        await this.changePaneCwd(pane.id, launchCwd);
-      }
+      if (!projectRoot) throw new Error('Could not resolve working directory: open a project folder before running an agent.');
+      if (pane.cwd !== projectRoot) await this.changePaneCwd(pane.id, projectRoot);
+      if (this.panes.get(pane.id)?.cwd !== projectRoot) throw new Error(`Could not resolve working directory: pane did not restart in ${projectRoot}.`);
     };
 
     if (scope === 'single') {
       const pane = this.panes.get(targetPaneId);
       if (pane) {
-        await startInProjectRoot(pane);
+        try { await startInProjectRoot(pane); } catch (error) { this.showBanner(error.message, 'error'); return; }
         if (cmd.trim()) {
           window.electronAPI.writePty(pane.id, cmd + '\r');
         }
@@ -777,7 +776,7 @@ class AppController {
     } else if (scope === 'all') {
       let idx = 1;
       for (const pane of this.panes.values()) {
-        await startInProjectRoot(pane);
+        try { await startInProjectRoot(pane); } catch (error) { this.showBanner(error.message, 'error'); return; }
         if (cmd.trim()) {
           window.electronAPI.writePty(pane.id, cmd + '\r');
         }

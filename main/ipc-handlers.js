@@ -167,11 +167,9 @@ function registerIpcHandlers({ openEditorFile } = {}) {
   };
 
   function resolveFsPath(targetPath) {
-    if (!targetPath) return targetPath;
+    if (!targetPath) throw new Error('Could not resolve working directory: no file path was provided.');
     if (path.isAbsolute(targetPath)) return targetPath;
-    const pr = projectRoot.get();
-    if (pr) return path.resolve(pr, targetPath);
-    return path.resolve(targetPath);
+    return path.resolve(projectRoot.resolveWorkingDirectory(null, 'filesystem operation'), targetPath);
   }
 
   ipcMain.handle('fs:read-dir', async (event, dirPath) => {

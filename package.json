@@ -12,6 +12,7 @@
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win --x64",
     "test:smoke": "node test/smoke.js",
+    "test:external-cwd": "node test/verify-external-cwd.js",
     "test:custom-models": "node test/verify-custom-models.js",
     "test:editor-window": "node test/verify_editor_window.js"
   },
