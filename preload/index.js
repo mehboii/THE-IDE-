@@ -23,6 +23,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('pty-exit', handler);
     return () => ipcRenderer.removeListener('pty-exit', handler);
   },
+  onCwdWarning: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('cwd:warning', handler);
+    return () => ipcRenderer.removeListener('cwd:warning', handler);
+  },
+  onProjectRootChanged: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('project-root:changed', handler);
+    return () => ipcRenderer.removeListener('project-root:changed', handler);
+  },
 
   // tmux Methods
   checkTmux: () => ipcRenderer.invoke('tmux:check'),

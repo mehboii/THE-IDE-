@@ -10,11 +10,24 @@ function registerIpcHandlers({ openEditorFile } = {}) {
   // The active project root is deliberately main-process state so the file
   // tree, PTY spawner, and model tool loop cannot silently drift apart.
   ipcMain.handle('project-root:get', () => projectRoot.get());
-  ipcMain.handle('project-root:set', (event, root) => projectRoot.set(root));
+  ipcMain.handle('project-root:set', (event, root) => {
+    const assigned = projectRoot.set(root);
+    console.log(`[OPENED FOLDER IPC] renderer requested=${JSON.stringify(root)} assigned=${JSON.stringify(assigned)}`);
+    // The editor is a separate renderer. Broadcast its folder changes to the
+    // terminal renderer too, so already-running shells cannot retain a prior
+    // project cwd after File > Open Folder is used in either window.
+    ptyManager.send('project-root:changed', { root: assigned, sourceWebContentsId: event.sender.id });
+    return assigned;
+  });
 
   // PTY session handlers
   ipcMain.handle('pty:create', async (event, params) => {
-    return ptyManager.createSession(params);
+    try {
+      return await ptyManager.createSession(params);
+    } catch (error) {
+      event.sender.send('cwd:warning', { action: params?.trigger || 'unknown-pane-action', error: error.message, cwd: params?.cwd || null, openedFolder: projectRoot.get() });
+      throw error;
+    }
   });
 
   ipcMain.on('pty:write', (event, { paneId, data }) => {
@@ -35,7 +48,12 @@ function registerIpcHandlers({ openEditorFile } = {}) {
     // not a reattach to a dead session. Pass forceNew:false to reattach only.
     const forceNew = params.forceNew !== false;
     await ptyManager.destroySession(params.paneId, forceNew);
-    return ptyManager.createSession({ ...params, forceNew });
+    try {
+      return await ptyManager.createSession({ ...params, forceNew });
+    } catch (error) {
+      event.sender.send('cwd:warning', { action: params?.trigger || 'pane-restart', error: error.message, cwd: params?.cwd || null, openedFolder: projectRoot.get() });
+      throw error;
+    }
   });
 
   // tmux management handlers
@@ -257,7 +275,14 @@ function registerIpcHandlers({ openEditorFile } = {}) {
 
   // Runner & Debugger IPC handlers
   const runner = require('./runner');
-  ipcMain.handle('runner:execute', (event, payload) => runner.execute(event.sender, payload));
+  ipcMain.handle('runner:execute', async (event, payload) => {
+    try {
+      return await runner.execute(event.sender, payload);
+    } catch (error) {
+      event.sender.send('cwd:warning', { action: 'run-or-debug', error: error.message, cwd: payload?.filePath || null, openedFolder: projectRoot.get() });
+      return { success: false, message: error.message };
+    }
+  });
   ipcMain.handle('runner:stop', (event, runId) => runner.stop(runId));
   ipcMain.handle('runner:debug-command', (event, { runId, command }) => runner.sendDebugCommand(runId, command));
 }

@@ -1,6 +1,18 @@
 const fs = require('fs');
 const path = require('path');
 
+function diagnosticLog(line) {
+  console.log(line);
+  // Packaged apps usually have no visible parent console. Keep the exact
+  // spawn/root trace in a durable per-user log as well.
+  try {
+    const { app } = require('electron');
+    if (app?.isReady?.()) {
+      fs.appendFileSync(path.join(app.getPath('userData'), 'process-cwd.log'), `${new Date().toISOString()} ${line}\n`);
+    }
+  } catch (_) { /* diagnostics must never prevent a launch */ }
+}
+
 // The main process owns the active project root. Renderer state is a view of
 // this value only; execution code must always resolve its default from here.
 class ProjectRoot {
@@ -9,12 +21,15 @@ class ProjectRoot {
   get() { return this.currentWorkspaceRoot; }
 
   /**
-   * The only cwd resolver used by process-launch paths.  It intentionally
-   * never falls back to process.cwd(): Electron's packaged cwd is frequently
-   * the installation directory, which must never become a project workspace.
+   * Resolve a working directory for spawned processes. When no project folder is
+   * opened yet, refuse to spawn. Falling back to Electron's app path or the
+   * process cwd is unsafe: it is how a terminal could silently start in the
+   * IDE checkout/install directory instead of the folder selected by the user.
    */
   resolveWorkingDirectory(candidate, purpose = 'process', preferOpenedFolder = true) {
-    const requested = (preferOpenedFolder && this.currentWorkspaceRoot) || candidate;
+    // `candidate` is accepted only for the Open Folder assignment itself.
+    // Spawn callers cannot substitute a pane-local path when no folder is open.
+    const requested = preferOpenedFolder ? this.currentWorkspaceRoot : candidate;
     if (!requested || typeof requested !== 'string') {
       throw new Error(`Could not resolve working directory for ${purpose}: no opened folder is available.`);
     }
@@ -39,7 +54,21 @@ class ProjectRoot {
   set(root) {
     if (!root) { this.currentWorkspaceRoot = null; return null; }
     this.currentWorkspaceRoot = this.resolveWorkingDirectory(root, 'opened folder', false);
+    // Permanent trace point: this is the only state transition that changes
+    // the execution root for PTYs, Runner, and model tools.
+    diagnosticLog(`[OPENED FOLDER] Project root assigned: ${JSON.stringify(this.currentWorkspaceRoot)}`);
     return this.currentWorkspaceRoot;
+  }
+
+  assertSpawnCwd(resolvedCwd, action) {
+    const expected = this.currentWorkspaceRoot;
+    if (!expected || resolvedCwd !== expected) {
+      const message = `Blocked ${action}: resolved cwd ${JSON.stringify(resolvedCwd)} does not match opened folder ${JSON.stringify(expected)}.`;
+      diagnosticLog(`[CWD MISMATCH] ${message}`);
+      throw new Error(message);
+    }
+    diagnosticLog(`[PROCESS SPAWN] action=${action} cwd=${JSON.stringify(resolvedCwd)} openedFolder=${JSON.stringify(expected)}`);
+    return resolvedCwd;
   }
 }
 
