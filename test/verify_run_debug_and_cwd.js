@@ -55,6 +55,10 @@ async function waitForWindow(app, marker) {
       await window.appInstance.fileExplorer.setRootDirectory(folder, true);
     }, sandboxDir);
 
+    // This direct Node-side module assertion runs outside Electron's main
+    // process, so mirror the Open Folder assignment in its module instance.
+    // Production tool calls receive this root through main-process IPC.
+    require('../main/project-root').set(sandboxDir);
     const customModelTools = require('../main/custom-model-tools');
     const executeToolResult = await customModelTools.executeTool('write_file', { path: 'test-marker.txt', content: 'hello from agent tool' }, sandboxDir);
     console.log('Tool execute result:', executeToolResult);

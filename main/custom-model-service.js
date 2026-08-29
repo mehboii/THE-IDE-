@@ -136,7 +136,7 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
     // remain usable before a folder is opened, just like OpenAI-compatible chat.
     if (agentic) {
       const projectCwd = projectRoot.resolveWorkingDirectory(cwd, 'model tool loop');
-      console.log(`[MODEL CWD ASSERTION] Model tool loop working directory: ${projectCwd}`);
+      projectRoot.assertSpawnCwd(projectCwd, 'custom-model:tool-loop');
       return await streamOllamaAgent(webContents, paneId, requestId, model, messages, projectCwd, fullAutoApprove, Math.min(Math.max(Number(maxIterations) || 25, 1), 100));
     }
     if (model.type === 'ollama') return await streamOllamaAgent(webContents, paneId, requestId, model, messages, cwd, fullAutoApprove, 1);

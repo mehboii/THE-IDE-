@@ -68,7 +68,7 @@ async function executeTool(name, args, cwd) {
     if (name === 'run_command') {
       const blocked = destructiveCommand(args.command); if (blocked) return { ok: false, error: blocked };
       const commandCwd = resolvedPath(root, args.cwd || '.'); await realPathInside(root, commandCwd);
-      console.log(`[EXEC ASSERTION] Running command: ${args.command} in cwd: ${commandCwd}`);
+      projectRoot.assertSpawnCwd(commandCwd, 'custom-model:run_command');
       try { const result = await execAsync(String(args.command), { cwd: commandCwd, timeout: 30_000, maxBuffer: 1024 * 1024, shell: '/bin/zsh' }); return { ok: true, stdout: result.stdout, stderr: result.stderr, exitCode: 0 }; }
       catch (error) { return { ok: false, stdout: error.stdout || '', stderr: error.stderr || error.message, exitCode: Number.isInteger(error.code) ? error.code : 1 }; }
     }

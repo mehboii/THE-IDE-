@@ -31,14 +31,14 @@ class PtyManager {
     return { available: result.ok, version: result.ok ? result.stdout.trim() : null, error: result.error };
   }
 
-  async createSession({ paneId, cwd, agentCommand = '', envVars = {}, customSessionName, cols = 80, rows = 24, forceNew = true }) {
+  async createSession({ paneId, cwd, agentCommand = '', envVars = {}, customSessionName, cols = 80, rows = 24, forceNew = true, trigger = 'unknown-pane-action' }) {
     if (!paneId) throw new Error('paneId is required');
     await this.destroySession(paneId, false);
 
     // Once a folder is open, it is the sole cwd authority for every spawn.
     // Renderer pane state cannot override the Explorer's project root.
     const safeCwd = projectRoot.resolveWorkingDirectory(cwd, `PTY session ${paneId}`);
-    console.log(`[PTY CWD ASSERTION] Spawning PTY session ${paneId} with cwd: ${JSON.stringify(safeCwd)} (projectRoot: ${JSON.stringify(projectRoot.get())})`);
+    projectRoot.assertSpawnCwd(safeCwd, `pty:${trigger} pane=${paneId}`);
     const tmux = await this.checkTmuxAvailable();
 
     // Fallback mode when tmux is not installed / not on PATH

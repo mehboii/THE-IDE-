@@ -112,7 +112,7 @@ class RunnerManager {
 
     // Standard Run / Run Without Debugging execution
     const runId = `run-${this.runIdCounter++}`;
-    console.log(`[RUNNER ASSERTION] Spawning process '${command} ${args.join(' ')}' with cwd: ${cwd}`);
+    projectRoot.assertSpawnCwd(cwd, `runner:run ${command}`);
 
     let child;
     try {
@@ -148,7 +148,7 @@ class RunnerManager {
   async startDebugRun(webContents, { filePath, command, args, cwd, port, breakpoints }) {
     const runId = `debug-${this.runIdCounter++}`;
     const fileName = path.basename(filePath);
-    console.log(`[DEBUG ASSERTION] Spawning debug process '${command} ${args.join(' ')}' on port ${port} with cwd: ${cwd}`);
+    projectRoot.assertSpawnCwd(cwd, `runner:debug ${command}`);
 
     let child;
     try {

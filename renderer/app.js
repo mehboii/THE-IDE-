@@ -107,7 +107,14 @@ class AppController {
     this.fileExplorer.onFileSelect((filePath) => {
       window.electronAPI.openEditorFile(filePath);
     });
-    this.fileExplorer.onRootChange((dirPath) => window.electronAPI.setProjectRoot(dirPath));
+    this.fileExplorer.onRootChange(async (dirPath) => {
+      // This assignment is the renderer-to-main handoff for the one true
+      // execution root. Awaiting it prevents a pane launch from racing Open
+      // Folder and using an earlier pane-local/default cwd.
+      const canonicalRoot = await window.electronAPI.setProjectRoot(dirPath);
+      console.info('[OPENED FOLDER] Renderer confirmed project root:', canonicalRoot);
+      return canonicalRoot;
+    });
 
     // Restore the explorer as a view of the authoritative main-process root.
     const projectRoot = await window.electronAPI.getProjectRoot();
@@ -147,6 +154,16 @@ class AppController {
         this.renderEditorTabs();
         this.renderSidebarSessions();
       }
+    });
+    window.electronAPI.onCwdWarning(({ action, error, cwd, openedFolder }) => {
+      this.showBanner(`Working-directory safety check blocked ${action}: ${error} Requested: ${cwd || '(none)'}; opened folder: ${openedFolder || '(none)'}.`, 'error');
+    });
+    window.electronAPI.onProjectRootChanged(({ root }) => {
+      // Includes File > Open Folder initiated by the detached editor window.
+      // Queue rather than overlap restarts when users switch folders quickly.
+      this._rootSync = (this._rootSync || Promise.resolve())
+        .then(() => this.syncPanesToOpenedFolder(root))
+        .catch((error) => this.showBanner(`Could not apply opened folder to terminals: ${error.message}`, 'error'));
     });
     window.electronAPI.onCustomModelToken(({ paneId, token }) => this.panes.get(paneId)?.receiveToken?.(token));
     window.electronAPI.onCustomModelDone(({ paneId }) => this.panes.get(paneId)?.receiveDone?.());
@@ -189,7 +206,7 @@ class AppController {
     return this.panes.size + this._pendingCreates;
   }
 
-  async createPane({ id, label, cwd, agentId, customSessionName, customModel, forceNew } = {}) {
+  async createPane({ id, label, cwd, agentId, customSessionName, customModel, forceNew, trigger = 'new-pane' } = {}) {
     if (this.effectivePaneCount() >= 6) {
       this.showBanner('Maximum 6 terminal panes supported simultaneously.');
       return null;
@@ -208,7 +225,13 @@ class AppController {
       if (customModel) return this.createCustomModelPane({ id: paneId, label, customModel, cwd });
       const agentObj = this.agentsList.find((a) => a.id === agentId) || this.agentsList.find((a) => a.id === 'shell') || this.agentsList[0];
       // An open Explorer folder is authoritative for every new process.
-      const initialCwd = await window.electronAPI.getProjectRoot() || cwd || '';
+      // Do not use a persisted workspace/pane cwd as a fallback. It may refer
+      // to a previous project (or an old development checkout). The main
+      // process ProjectRoot is the only execution authority.
+      const initialCwd = await window.electronAPI.getProjectRoot();
+      // The main process rejects a missing root before any PTY is spawned and
+      // emits a visible cwd:warning. Keeping the inert pane lets the default
+      // startup shell become usable immediately after Open Folder syncs it.
 
       const pane = new TerminalPane({
         id: paneId,
@@ -249,6 +272,7 @@ class AppController {
           // Send an explicit value so ordinary panes cannot reattach to a
           // fixed-name tmux session from an earlier launch.
           forceNew: forceNew !== false,
+          trigger,
           cols: dims.cols,
           rows: dims.rows
         });
@@ -278,7 +302,10 @@ class AppController {
 
   async createCustomModelPane({ id, label, customModel, cwd }) {
     // An open Explorer folder is authoritative for every new chat/tool pane.
-    const initialCwd = await window.electronAPI.getProjectRoot() || cwd || '';
+    // A chat pane may be displayed before a project is opened, but it must not
+    // inherit a stale saved pane cwd. Tool execution re-resolves ProjectRoot in
+    // the main process immediately before it runs.
+    const initialCwd = await window.electronAPI.getProjectRoot() || '';
     const pane = new CustomModelPane({ id, label: label || customModel.name, model: customModel, cwd: initialCwd,
       onFocus: (pId) => this.focusPane(pId), onClose: (pId) => this.removePane(pId),
       onRestart: (pId) => this.restartPane(pId), onKill: (pId) => this.killPaneSession(pId),
@@ -319,7 +346,7 @@ class AppController {
    * Restart pane. When killTmux is true (default for UI Restart), kill the old
    * tmux session first so -A does not reattach to a dead/stale session.
    */
-  async restartPane(paneId, { killTmux = true } = {}) {
+  async restartPane(paneId, { killTmux = true, trigger = 'pane-restart' } = {}) {
     const pane = this.panes.get(paneId);
     if (!pane) return;
 
@@ -333,11 +360,18 @@ class AppController {
       if (killTmux) {
         await window.electronAPI.destroyPty(paneId, true);
       }
+      // Read the live main-process state at the instant of spawning. Pane.cwd
+      // is presentation state only and is never allowed to select a process
+      // working directory.
+      const liveRoot = await window.electronAPI.getProjectRoot();
+      if (!liveRoot) throw new Error('Open a folder before restarting a terminal. No process was started.');
+      pane.setCwd(liveRoot);
       const result = await window.electronAPI.restartPty({
         paneId,
-        cwd: pane.cwd,
+        cwd: liveRoot,
         agentCommand: agentObj ? agentObj.command : '',
         envVars: agentObj ? (agentObj.env || {}) : {},
+        trigger,
         cols: dims.cols,
         rows: dims.rows
       });
@@ -378,16 +412,15 @@ class AppController {
     // introduce a second, hidden execution root for one pane.
     if (newCwd && this.fileExplorer) {
       await this.fileExplorer.setRootDirectory(newCwd, true);
-      const canonicalRoot = await window.electronAPI.getProjectRoot();
-      this.panes.get(paneId)?.setCwd(canonicalRoot || '');
+      return;
     }
-    await this.restartPane(paneId, { killTmux: true });
+    await this.restartPane(paneId, { killTmux: true, trigger: 'pane-folder-change' });
   }
 
   async changePaneAgent(paneId, newAgentId) {
     const pane = this.panes.get(paneId);
     if (pane) pane.agentId = newAgentId;
-    await this.restartPane(paneId, { killTmux: true });
+    await this.restartPane(paneId, { killTmux: true, trigger: 'agent-preset-change' });
   }
 
   focusPane(paneId) {
@@ -406,10 +439,26 @@ class AppController {
       await this.createPane({
         id: `pane-${i}`,
         label: `Shell ${i}`,
-        agentId: 'shell'
+        agentId: 'shell',
+        trigger: 'app-boot-default-shell'
       });
     }
     this.paneIdCounter = Math.max(this.paneIdCounter, count + 1);
+  }
+
+  async syncPanesToOpenedFolder(canonicalRoot) {
+    if (!canonicalRoot) return;
+    for (const pane of this.panes.values()) {
+      pane.setCwd(canonicalRoot);
+      // Chat panes do not spawn child processes. Future tool calls read the
+      // main-process ProjectRoot again, while terminal sessions must restart
+      // immediately so manually entered Codex/Claude/Aider commands cannot
+      // retain the pre-opened app/install cwd.
+      if (!(pane instanceof CustomModelPane)) {
+        await this.restartPane(pane.id, { killTmux: true, trigger: 'opened-folder-sync' });
+      }
+    }
+    this.showBanner(`Opened folder: ${canonicalRoot}. All terminal sessions now use this working directory.`);
   }
 
   async killAllSessions() {
@@ -749,8 +798,6 @@ class AppController {
     const agentObj = this.agentsList.find((a) => a.id === agentId);
     if (!agentObj) return;
 
-    const cmd = agentObj.command || '';
-
     const startInProjectRoot = async (pane) => {
       // Run Agent starts a new CLI session in the open project, even when the
       // target is a default pane that was created before Open Folder. This
@@ -761,14 +808,22 @@ class AppController {
       if (this.panes.get(pane.id)?.cwd !== projectRoot) throw new Error(`Could not resolve working directory: pane did not restart in ${projectRoot}.`);
     };
 
+    // Launch the chosen CLI by replacing the PTY session instead of typing a
+    // command into an old shell. This makes the main process the observable
+    // spawn point and guarantees the command cannot inherit a stale cwd.
+    const launchInPane = async (pane, trigger) => {
+      await startInProjectRoot(pane);
+      pane.agentId = agentObj.id;
+      await this.restartPane(pane.id, { killTmux: true, trigger });
+      if (this.panes.get(pane.id)?.cwd !== await window.electronAPI.getProjectRoot()) {
+        throw new Error('Could not resolve working directory: agent session did not start in the opened folder.');
+      }
+    };
+
     if (scope === 'single') {
       const pane = this.panes.get(targetPaneId);
       if (pane) {
-        try { await startInProjectRoot(pane); } catch (error) { this.showBanner(error.message, 'error'); return; }
-        if (cmd.trim()) {
-          window.electronAPI.writePty(pane.id, cmd + '\r');
-        }
-        pane.agentId = agentObj.id;
+        try { await launchInPane(pane, 'run-agent-button'); } catch (error) { this.showBanner(error.message, 'error'); return; }
         pane.label = agentObj.name;
         pane.labelInput.value = agentObj.name;
         pane.agentSelect.value = agentObj.id;
@@ -776,11 +831,7 @@ class AppController {
     } else if (scope === 'all') {
       let idx = 1;
       for (const pane of this.panes.values()) {
-        try { await startInProjectRoot(pane); } catch (error) { this.showBanner(error.message, 'error'); return; }
-        if (cmd.trim()) {
-          window.electronAPI.writePty(pane.id, cmd + '\r');
-        }
-        pane.agentId = agentObj.id;
+        try { await launchInPane(pane, 'run-agent-all'); } catch (error) { this.showBanner(error.message, 'error'); return; }
         const nameLabel = this.panes.size > 1 ? `${agentObj.name} ${idx++}` : agentObj.name;
         pane.label = nameLabel;
         pane.labelInput.value = nameLabel;
