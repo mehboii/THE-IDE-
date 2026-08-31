@@ -224,14 +224,10 @@ class AppController {
 
       if (customModel) return this.createCustomModelPane({ id: paneId, label, customModel, cwd });
       const agentObj = this.agentsList.find((a) => a.id === agentId) || this.agentsList.find((a) => a.id === 'shell') || this.agentsList[0];
-      // An open Explorer folder is authoritative for every new process.
-      // Do not use a persisted workspace/pane cwd as a fallback. It may refer
-      // to a previous project (or an old development checkout). The main
-      // process ProjectRoot is the only execution authority.
+      // An open Explorer folder is authoritative for every new process. Until
+      // one is opened, the main process starts the terminal in the user's home
+      // directory; never use a persisted pane or workspace cwd as a fallback.
       const initialCwd = await window.electronAPI.getProjectRoot();
-      // The main process rejects a missing root before any PTY is spawned and
-      // emits a visible cwd:warning. Keeping the inert pane lets the default
-      // startup shell become usable immediately after Open Folder syncs it.
 
       const pane = new TerminalPane({
         id: paneId,
@@ -364,8 +360,9 @@ class AppController {
       // is presentation state only and is never allowed to select a process
       // working directory.
       const liveRoot = await window.electronAPI.getProjectRoot();
-      if (!liveRoot) throw new Error('Open a folder before restarting a terminal. No process was started.');
-      pane.setCwd(liveRoot);
+      // A missing project root is valid for ordinary terminal shells: the
+      // main process chooses the safe home-directory fallback in that case.
+      if (liveRoot) pane.setCwd(liveRoot);
       const result = await window.electronAPI.restartPty({
         paneId,
         cwd: liveRoot,

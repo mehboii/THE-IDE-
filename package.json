@@ -1,6 +1,6 @@
 {
   "name": "agent-terminal-ide",
-  "version": "1.0.3",
+  "version": "2.0.0",
   "description": "Desktop Terminal IDE for managing multiple CLI coding agents (Claude, Codex, Aider) simultaneously in a grid layout",
   "main": "main/index.js",
   "scripts": {

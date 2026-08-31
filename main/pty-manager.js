@@ -36,8 +36,9 @@ class PtyManager {
     await this.destroySession(paneId, false);
 
     // Once a folder is open, it is the sole cwd authority for every spawn.
-    // Renderer pane state cannot override the Explorer's project root.
-    const safeCwd = projectRoot.resolveWorkingDirectory(cwd, `PTY session ${paneId}`);
+    // Before that, terminal shells start in the user's home directory rather
+    // than failing (or inheriting the IDE installation directory).
+    const safeCwd = projectRoot.resolveTerminalWorkingDirectory(`PTY session ${paneId}`);
     projectRoot.assertSpawnCwd(safeCwd, `pty:${trigger} pane=${paneId}`);
     const tmux = await this.checkTmuxAvailable();
 
