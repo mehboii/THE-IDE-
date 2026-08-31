@@ -1024,6 +1024,7 @@ class AppController {
       view: [
         { label: 'Command Palette…', accel: 'Ctrl+Shift+P', run: () => this.openCommandPalette() },
         { label: 'Toggle Side Bar', accel: 'Ctrl+B', run: () => this.toggleSidebar() },
+        { label: 'Toggle Full Screen', accel: 'F11', run: () => window.electronAPI.controlWindow('toggle-fullscreen') },
         { sep: true },
         { label: '2×3 Grid', run: () => this.setGridPreset('2x3') },
         { label: '3×2 Grid', run: () => this.setGridPreset('3x2') }
@@ -1091,6 +1092,13 @@ class AppController {
   }
 
   attachEventListeners() {
+    const windowControl = (id, action) => document.getElementById(id)?.addEventListener('click', () => window.electronAPI.controlWindow(action));
+    windowControl('btn-window-minimize', 'minimize');
+    windowControl('btn-window-fullscreen', 'toggle-fullscreen');
+    windowControl('btn-window-close', 'close');
+    document.getElementById('titlebar')?.addEventListener('dblclick', (event) => {
+      if (!event.target.closest('button')) window.electronAPI.controlWindow('toggle-maximize');
+    });
     this.btnAddPane.addEventListener('click', () => this.createPane({}));
     this.btnKillAll.addEventListener('click', () => this.killAllSessions());
     this.btnTabAdd.addEventListener('click', () => this.createPane({}));
