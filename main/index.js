@@ -10,15 +10,14 @@ let editorReady = false;
 
 function getGlassWindowOptions() {
   return {
-    transparent: true,
-    backgroundColor: '#00000000',
+    transparent: false,
+    backgroundColor: '#101119',
     frame: true,
     resizable: true,
     minimizable: true,
     maximizable: true,
     closable: true,
     ...(process.platform === 'darwin' ? { vibrancy: 'under-window', visualEffectState: 'active' } : {}),
-    ...(process.platform === 'win32' ? { backgroundMaterial: 'mica' } : {})
   };
 }
 
