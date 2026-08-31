@@ -1591,7 +1591,7 @@ kbd {
 }
 
 /* =============================================================================
-   Liquid Glass theme — chrome only; xterm and Monaco remain opaque for legibility.
+   Liquid Glass theme - chrome only; xterm and Monaco remain opaque for legibility.
    ============================================================================= */
 :root {
   --glass-bg: rgba(28, 30, 42, .58);

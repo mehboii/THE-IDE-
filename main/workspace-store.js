@@ -10,7 +10,7 @@ class WorkspaceStore {
   _readAll() {
     try {
       if (fs.existsSync(this.storePath)) {
-        const raw = fs.readFileSync(this.storePath, 'utf-8');
+        const raw = fs.readFileSync(this.storePath, { encoding: 'utf8' });
         return JSON.parse(raw);
       }
     } catch (err) {
