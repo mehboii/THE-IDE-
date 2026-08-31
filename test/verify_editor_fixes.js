@@ -164,7 +164,7 @@ const saveAsTestFile = path.join(root, 'test', 'temp_saveas_test.js');
     assert.strictEqual(isTerminalsVisible, true, 'Terminal panel should be restored when clicking Terminals in Activity Bar');
 
     const finalPaneIds = await page.evaluate(() => Array.from(window.appInstance.panes.keys()));
-    assert.deepStrictEqual(finalPaneIds, initialPaneIds, 'Pane IDs must match initial set — zero panes destroyed or re-created');
+    assert.deepStrictEqual(finalPaneIds, initialPaneIds, 'Pane IDs must match initial set \u2014 zero panes destroyed or re-created');
 
     // Check buffer content in Pane 1
     const bufferContainsMarker = await page.evaluate(({ paneId, text }) => {

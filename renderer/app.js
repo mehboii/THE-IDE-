@@ -148,7 +148,7 @@ class AppController {
         const next = status === 'detached' ? 'detached' : 'exited';
         pane.setStatus(next);
         this.showBanner(
-          `Session for "${pane.label}" ended (code ${exitCode ?? '?'}). tmux may have been killed externally — use Restart to recover.`,
+          `Session for "${pane.label}" ended (code ${exitCode ?? '?'}). tmux may have been killed externally \u2014 use Restart to recover.`,
           'error'
         );
         this.renderEditorTabs();
@@ -184,7 +184,7 @@ class AppController {
       this.tmuxStatusBadge.className = 'badge badge-danger';
       if (this.statusBar) this.statusBar.classList.add('tmux-missing');
       this.showBanner(
-        'tmux not found — install it to enable session persistence across restarts: `brew install tmux` (macOS) or `sudo apt install tmux` (Linux). Continuing without persistence for now.',
+        'tmux not found \u2014 install it to enable session persistence across restarts: `brew install tmux` (macOS) or `sudo apt install tmux` (Linux). Continuing without persistence for now.',
         'warning'
       );
     }
@@ -469,7 +469,7 @@ class AppController {
     }
     // Mark all panes exited, then clear the grid (which calls destroy on each)
     for (const pane of this.panes.values()) {
-      pane.status = 'exited'; // raw set — don't trigger callbacks on dead panes
+      pane.status = 'exited'; // raw set \u2014 don't trigger callbacks on dead panes
     }
     this.panes.clear();
     this.gridManager.clearAll();
@@ -525,7 +525,7 @@ class AppController {
 
   async loadWorkspaceOptions() {
     this.workspaces = await window.electronAPI.getWorkspaces() || {};
-    this.workspaceSelect.innerHTML = '<option value="">— Workspace —</option>';
+    this.workspaceSelect.innerHTML = '<option value="">\u2014 Workspace \u2014</option>';
     for (const name of Object.keys(this.workspaces)) {
       const opt = document.createElement('option');
       opt.value = name;
@@ -638,7 +638,7 @@ class AppController {
       tab.innerHTML = `
         <span class="editor-tab-icon">&gt;_</span>
         <span class="editor-tab-label" title="${this.escapeHtml(pane.label)}">${this.escapeHtml(pane.label)}</span>
-        <button class="editor-tab-action" type="button" title="Close" aria-label="Close ${this.escapeHtml(pane.label)}">×</button>
+        <button class="editor-tab-action" type="button" title="Close" aria-label="Close ${this.escapeHtml(pane.label)}">\u00D7</button>
       `;
 
       tab.addEventListener('click', (e) => {
@@ -854,7 +854,7 @@ class AppController {
     this.sidebarCollapsed = force != null ? force : !this.sidebarCollapsed;
     if (this.sideBar) this.sideBar.classList.toggle('collapsed', this.sidebarCollapsed);
     if (this.appShell) this.appShell.classList.toggle('sidebar-collapsed', this.sidebarCollapsed);
-    // Reflow terminals after layout change — use transitionend for animated sidebar
+    // Reflow terminals after layout change \u2014 use transitionend for animated sidebar
     const onDone = () => {
       this.gridManager && this.gridManager.reflowAll();
     };
@@ -902,9 +902,9 @@ class AppController {
       { id: 'broadcast', label: 'Terminal: Toggle Broadcast Mode', accel: 'Ctrl+Shift+B', run: () => window.broadcastManager.toggle() },
       { id: 'kill-all', label: 'Terminal: Kill All Sessions', accel: 'Ctrl+Shift+K', run: () => this.killAllSessions() },
       { id: 'save-ws', label: 'Workspace: Save Current Layout', accel: '', run: () => this.saveCurrentWorkspace() },
-      { id: 'load-ws', label: 'Workspace: Open Select…', accel: '', run: () => this.workspaceSelect && this.workspaceSelect.focus() },
-      { id: 'grid-2x3', label: 'View: 2×3 Grid Layout', accel: '', run: () => this.setGridPreset('2x3') },
-      { id: 'grid-3x2', label: 'View: 3×2 Grid Layout', accel: '', run: () => this.setGridPreset('3x2') },
+      { id: 'load-ws', label: 'Workspace: Open Select\u2026', accel: '', run: () => this.workspaceSelect && this.workspaceSelect.focus() },
+      { id: 'grid-2x3', label: 'View: 2\u00D73 Grid Layout', accel: '', run: () => this.setGridPreset('2x3') },
+      { id: 'grid-3x2', label: 'View: 3\u00D72 Grid Layout', accel: '', run: () => this.setGridPreset('3x2') },
       { id: 'toggle-sidebar', label: 'View: Toggle Side Bar', accel: 'Ctrl+B', run: () => this.toggleSidebar() },
       { id: 'search', label: 'Terminal: Search Scrollback', accel: 'Ctrl+F', run: () => this.searchFocusedTerminal() },
       { id: 'help', label: 'Help: Keyboard Shortcuts', accel: '', run: () => this.modalHelp.classList.remove('hidden') },
@@ -1006,10 +1006,10 @@ class AppController {
   setupMenubar() {
     const menus = {
       file: [
-        { label: 'Open Folder…', accel: 'Ctrl+O', run: () => this.fileExplorer && this.fileExplorer.handleOpenFolderClick() },
+        { label: 'Open Folder\u2026', accel: 'Ctrl+O', run: () => this.fileExplorer && this.fileExplorer.handleOpenFolderClick() },
         { sep: true },
         { label: 'New Pane', accel: 'Ctrl+Shift+N', run: () => this.createPane({}) },
-        { label: 'Save Workspace…', run: () => this.saveCurrentWorkspace() },
+        { label: 'Save Workspace\u2026', run: () => this.saveCurrentWorkspace() },
         { label: 'Delete Workspace', run: () => this.deleteSelectedWorkspace() },
         { sep: true },
         { label: 'Kill All Sessions', accel: 'Ctrl+Shift+K', run: () => this.killAllSessions() }
@@ -1022,12 +1022,12 @@ class AppController {
         { label: 'Search Scrollback', accel: 'Ctrl+F', run: () => this.searchFocusedTerminal() }
       ],
       view: [
-        { label: 'Command Palette…', accel: 'Ctrl+Shift+P', run: () => this.openCommandPalette() },
+        { label: 'Command Palette\u2026', accel: 'Ctrl+Shift+P', run: () => this.openCommandPalette() },
         { label: 'Toggle Side Bar', accel: 'Ctrl+B', run: () => this.toggleSidebar() },
         { label: 'Toggle Full Screen', accel: 'F11', run: () => window.electronAPI.controlWindow('toggle-fullscreen') },
         { sep: true },
-        { label: '2×3 Grid', run: () => this.setGridPreset('2x3') },
-        { label: '3×2 Grid', run: () => this.setGridPreset('3x2') }
+        { label: '2\u00D73 Grid', run: () => this.setGridPreset('2x3') },
+        { label: '3\u00D72 Grid', run: () => this.setGridPreset('3x2') }
       ],
       help: [
         { label: 'Keyboard Shortcuts', run: () => this.modalHelp.classList.remove('hidden') }
@@ -1186,7 +1186,7 @@ class AppController {
       const tag = (e.target && e.target.tagName) || '';
       const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable);
 
-      // Ctrl+Shift+P — Command Palette (always)
+      // Ctrl+Shift+P \u2014 Command Palette (always)
       if (e.ctrlKey && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault();
         this.openCommandPalette();
@@ -1209,7 +1209,7 @@ class AppController {
         // Still allow global shortcuts with Ctrl+Shift
       }
 
-      // Ctrl+1..6 — focus pane (requires Ctrl, so typing "1" in shell is safe)
+      // Ctrl+1..6 \u2014 focus pane (requires Ctrl, so typing "1" in shell is safe)
       if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '6') {
         const index = parseInt(e.key, 10) - 1;
         const paneKeys = Array.from(this.panes.keys());
@@ -1240,16 +1240,16 @@ class AppController {
         this.killAllSessions();
         return;
       }
-      // Ctrl+O — Open Folder
+      // Ctrl+O \u2014 Open Folder
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault();
         if (this.fileExplorer) this.fileExplorer.handleOpenFolderClick();
         return;
       }
 
-      // Ctrl+B — toggle sidebar (not when shift held)
+      // Ctrl+B \u2014 toggle sidebar (not when shift held)
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
-        // Skip if focus is inside an xterm terminal — Ctrl+B is the tmux prefix key.
+        // Skip if focus is inside an xterm terminal \u2014 Ctrl+B is the tmux prefix key.
         // Only intercept when focus is on a non-terminal element (matching VS Code behavior).
         const inTerminal = e.target && (e.target.closest('.xterm') || e.target.classList.contains('xterm-helper-textarea'));
         if (inTerminal) return; // let tmux handle it
@@ -1323,7 +1323,7 @@ class AppController {
     }
     if (this.titlebarTitle) {
       const ws = this.activeWorkspaceName || 'Untitled';
-      this.titlebarTitle.textContent = `${ws} — Agent Terminal IDE`;
+      this.titlebarTitle.textContent = `${ws} \u2014 Agent Terminal IDE`;
     }
 
     // Keep broadcast status in sync

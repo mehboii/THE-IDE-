@@ -62,7 +62,7 @@ function openEditorFile(filePath) {
     height: 800,
     minWidth: 700,
     minHeight: 500,
-    title: 'Agent Terminal IDE — Editor',
+    title: 'Agent Terminal IDE \u2014 Editor',
     icon: path.join(__dirname, '../build/icon.png'),
     ...getGlassWindowOptions(),
     webPreferences: {
@@ -98,9 +98,9 @@ function createEditorMenu() {
     {
       label: 'File',
       submenu: [
-        { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => callEditor('openFolder') },
+        { label: 'Open Folder\u2026', accelerator: 'CmdOrCtrl+O', click: () => callEditor('openFolder') },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => callEditor('save') },
-        { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => callEditor('saveAs') },
+        { label: 'Save As\u2026', accelerator: 'CmdOrCtrl+Shift+S', click: () => callEditor('saveAs') },
         { type: 'separator' },
         { role: 'close' }
       ]
@@ -202,7 +202,7 @@ function createWindow() {
       label: 'View',
       submenu: [
         {
-          label: 'Command Palette…',
+          label: 'Command Palette\u2026',
           accelerator: 'CmdOrCtrl+Shift+P',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {

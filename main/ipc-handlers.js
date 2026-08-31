@@ -218,7 +218,7 @@ function registerIpcHandlers({ openEditorFile } = {}) {
   ipcMain.handle('fs:read-file', async (event, filePath) => {
     try {
       const target = resolveFsPath(filePath);
-      const content = await fs.promises.readFile(target, 'utf8');
+      const content = await fs.promises.readFile(target, { encoding: 'utf8' });
       return { success: true, content };
     } catch (err) {
       return { success: false, error: err.message };
@@ -230,7 +230,7 @@ function registerIpcHandlers({ openEditorFile } = {}) {
       const target = resolveFsPath(filePath);
       console.log(`[FS WRITE ASSERTION] IPC fs:write-file writing to path: ${target}`);
       await fs.promises.mkdir(path.dirname(target), { recursive: true });
-      await fs.promises.writeFile(target, content, 'utf8');
+      await fs.promises.writeFile(target, content, { encoding: 'utf8' });
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };

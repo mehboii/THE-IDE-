@@ -164,7 +164,7 @@ class EditorApp {
     if (window.electronAPI.onDebugResumed) {
       window.electronAPI.onDebugResumed(({ runId }) => {
         if (runId === this.currentRunId) {
-          this.runOutputStatus.textContent = `[Running…]`;
+          this.runOutputStatus.textContent = `[Running\u2026]`;
           this.manager.clearPausedLine();
         }
       });
@@ -221,7 +221,7 @@ class EditorApp {
 
     this.currentRunId = result.runId;
     this.runOutputTitle.textContent = result.label || 'Run Output';
-    this.runOutputStatus.textContent = '[Running…]';
+    this.runOutputStatus.textContent = '[Running\u2026]';
     this.runOutputContent.textContent = '';
     this.runOutputPanel.classList.remove('hidden');
     this.btnStop.classList.remove('hidden');

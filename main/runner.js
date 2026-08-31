@@ -59,7 +59,7 @@ class RunnerManager {
       return {
         success: false,
         isNotice: true,
-        message: `Debugging not yet supported for this file type (${ext}) — Run Without Debugging is available.`
+        message: `Debugging not yet supported for this file type (${ext}) \u2014 Run Without Debugging is available.`
       };
     }
 

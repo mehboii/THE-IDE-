@@ -17,7 +17,7 @@ function baseUrl(model) {
 function endpointUrl(model, path) {
   const base = baseUrl(model);
   // Accept both a host root and a standard OpenAI base URL ending in /v1.
-  // Without this normalization, http://host/v1 silently became /v1/v1/… .
+  // Without this normalization, http://host/v1 silently became /v1/v1/\u2026 .
   if (model.type === 'openai' && /\/v1$/i.test(base) && /^\/v1\//i.test(path)) return `${base}${path.slice(3)}`;
   // Likewise, allow an Ollama API root to be supplied without duplicating /api.
   if (model.type === 'ollama' && /\/api$/i.test(base) && /^\/api\//i.test(path)) return `${base}${path.slice(4)}`;
@@ -41,7 +41,7 @@ const pendingApprovals = new Map();
 const knownToolFamilies = /^(qwen3|qwen2\.5|llama3\.1|llama3\.2|mistral-nemo|mistral-small|command-r|hermes)/i;
 
 function headers(model) {
-  const value = { 'Content-Type': 'application/json' };
+  const value = { 'Content-Type': 'application/json; charset=utf-8' };
   if (model.apiKey) value.Authorization = `Bearer ${model.apiKey}`;
   return value;
 }
@@ -64,7 +64,7 @@ async function testConnection(model) {
   try {
     const url = endpointUrl(model, model.type === 'ollama' ? '/api/tags' : '/v1/models');
     const response = await request(url, { headers: headers(model) });
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' — check API key' : ''}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' \u2014 check API key' : ''}`);
     const capability = await modelCapability(model);
     return { success: true, message: `Connected to ${url}`, toolCapable: capability.supported, capabilitySource: capability.source };
   } catch (error) { return { success: false, error: error.message }; }
@@ -141,7 +141,7 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
     }
     if (model.type === 'ollama') return await streamOllamaAgent(webContents, paneId, requestId, model, messages, cwd, fullAutoApprove, 1);
     const response = await request(url, { method: 'POST', headers: headers(model), body: JSON.stringify(body) });
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' — check API key' : ''}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' \u2014 check API key' : ''}`);
     if (!response.body) throw new Error('The endpoint returned no response stream.');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

@@ -57,7 +57,7 @@ async function executeTool(name, args, cwd) {
   const root = rootFor(cwd);
   try {
     await fs.access(root);
-    if (name === 'read_file') { const file = resolvedPath(root, args.path); await realPathInside(root, file); return { ok: true, content: await fs.readFile(file, 'utf8') }; }
+    if (name === 'read_file') { const file = resolvedPath(root, args.path); await realPathInside(root, file); return { ok: true, content: await fs.readFile(file, { encoding: 'utf8' }) }; }
     if (name === 'list_directory') { const dir = resolvedPath(root, args.path || '.'); await realPathInside(root, dir); const entries = await fs.readdir(dir, { withFileTypes: true }); return { ok: true, entries: entries.map((e) => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' })) }; }
     if (name === 'write_file') {
       const file = resolvedPath(root, args.path);

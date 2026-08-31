@@ -12,8 +12,8 @@ const FILE_ICON_MAP = {
   toml: { label: 'T', color: 'red' }, env: { label: 'E', color: 'green' },
   sh: { label: '$', color: 'green' }, bash: { label: '$', color: 'green' }, zsh: { label: '$', color: 'green' },
   sql: { label: 'SQL', color: 'pink' },
-  png: { label: '◈', color: 'purple' }, jpg: { label: '◈', color: 'purple' }, jpeg: { label: '◈', color: 'purple' }, gif: { label: '◈', color: 'purple' }, svg: { label: '◈', color: 'yellow' },
-  lock: { label: '•', color: 'muted' }, txt: { label: '≡', color: 'muted' },
+  png: { label: '\u25C8', color: 'purple' }, jpg: { label: '\u25C8', color: 'purple' }, jpeg: { label: '\u25C8', color: 'purple' }, gif: { label: '\u25C8', color: 'purple' }, svg: { label: '\u25C8', color: 'yellow' },
+  lock: { label: '\u2022', color: 'muted' }, txt: { label: '\u2261', color: 'muted' },
 };
 
 class FileExplorer {
@@ -203,7 +203,7 @@ class FileExplorer {
     if (normalizedName === '.gitignore') return { label: 'G', color: 'orange' };
     if (normalizedName === 'dockerfile') return { label: 'D', color: 'blue' };
     const ext = normalizedName.includes('.') ? normalizedName.split('.').pop() : '';
-    return FILE_ICON_MAP[ext] || { label: '•', color: 'muted' };
+    return FILE_ICON_MAP[ext] || { label: '\u2022', color: 'muted' };
   }
 }
 

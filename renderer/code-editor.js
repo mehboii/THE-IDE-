@@ -343,7 +343,7 @@ class CodeEditorManager {
         <button class="mode-toggle-pill ${tabData.mode}" type="button" title="Click to toggle View/Edit mode">
           ${tabData.mode === 'view' ? 'View' : 'Edit'}
         </button>
-        <button class="editor-tab-close" type="button" title="Close tab">×</button>
+        <button class="editor-tab-close" type="button" title="Close tab">\u00D7</button>
       `;
 
       // Event listeners
