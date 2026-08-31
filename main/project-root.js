@@ -1,4 +1,5 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 function diagnosticLog(line) {
@@ -19,6 +20,26 @@ class ProjectRoot {
   constructor() { this.currentWorkspaceRoot = null; }
 
   get() { return this.currentWorkspaceRoot; }
+
+  // A terminal still needs a valid, user-owned starting directory before the
+  // user opens a project. Never fall back to the app install path/process cwd:
+  // those can point at the IDE bundle or an arbitrary launcher directory.
+  defaultTerminalDirectory() {
+    const home = os.homedir();
+    if (!home || !fs.existsSync(home) || !fs.statSync(home).isDirectory()) {
+      throw new Error('Could not resolve a safe default terminal directory.');
+    }
+    return fs.realpathSync(home);
+  }
+
+  // PTYs use the opened folder whenever there is one. Before that, use the
+  // user home folder so default shells are usable immediately on first launch.
+  resolveTerminalWorkingDirectory(purpose = 'terminal') {
+    if (this.currentWorkspaceRoot) return this.resolveWorkingDirectory(null, purpose);
+    const home = this.defaultTerminalDirectory();
+    diagnosticLog(`[CWD RESOLUTION] ${purpose}: no opened folder; using terminal home ${JSON.stringify(home)}`);
+    return home;
+  }
 
   /**
    * Resolve a working directory for spawned processes. When no project folder is
@@ -61,7 +82,9 @@ class ProjectRoot {
   }
 
   assertSpawnCwd(resolvedCwd, action) {
-    const expected = this.currentWorkspaceRoot;
+    // Only PTYs may use the home-directory fallback. Other callers first use
+    // resolveWorkingDirectory(), which continues to require an opened folder.
+    const expected = this.currentWorkspaceRoot || this.defaultTerminalDirectory();
     if (!expected || resolvedCwd !== expected) {
       const message = `Blocked ${action}: resolved cwd ${JSON.stringify(resolvedCwd)} does not match opened folder ${JSON.stringify(expected)}.`;
       diagnosticLog(`[CWD MISMATCH] ${message}`);
