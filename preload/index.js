@@ -82,7 +82,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('file-changed', handler);
     return () => ipcRenderer.removeListener('file-changed', handler);
   },
-  openEditorFile: (filePath) => ipcRenderer.invoke('editor:open-file', filePath)
+  openEditorFile: (filePath) => ipcRenderer.invoke('editor:open-file', filePath),
+  controlWindow: (action) => ipcRenderer.invoke('window:control', action)
 });
 
 contextBridge.exposeInMainWorld('__IDE_TEST_MODE__', process.env.IDE_TEST_MODE === '1');

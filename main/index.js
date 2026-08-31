@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 const path = require('path');
 const ptyManager = require('./pty-manager');
 const { registerIpcHandlers } = require('./ipc-handlers');
@@ -8,6 +8,36 @@ let editorWindow = null;
 let pendingEditorFiles = [];
 let editorReady = false;
 
+function getGlassWindowOptions() {
+  return {
+    transparent: true,
+    backgroundColor: '#00000000',
+    frame: true,
+    resizable: true,
+    minimizable: true,
+    maximizable: true,
+    closable: true,
+    ...(process.platform === 'darwin' ? { vibrancy: 'under-window', visualEffectState: 'active' } : {}),
+    ...(process.platform === 'win32' ? { backgroundMaterial: 'mica' } : {})
+  };
+}
+
+
+function registerWindowControlHandlers() {
+  ipcMain.handle('window:control', (event, action) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!targetWindow || targetWindow.isDestroyed()) return false;
+
+    if (action === 'minimize') targetWindow.minimize();
+    if (action === 'toggle-maximize') {
+      if (targetWindow.isMaximized()) targetWindow.unmaximize();
+      else targetWindow.maximize();
+    }
+    if (action === 'toggle-fullscreen') targetWindow.setFullScreen(!targetWindow.isFullScreen());
+    if (action === 'close') targetWindow.close();
+    return targetWindow.isMaximized();
+  });
+}
 function sendFileToEditor(filePath) {
   if (!editorWindow || editorWindow.isDestroyed()) return;
   editorWindow.webContents.send('editor:open-file', filePath);
@@ -35,7 +65,7 @@ function openEditorFile(filePath) {
     minHeight: 500,
     title: 'Agent Terminal IDE — Editor',
     icon: path.join(__dirname, '../build/icon.png'),
-    backgroundColor: '#1e1e1e',
+    ...getGlassWindowOptions(),
     webPreferences: {
       preload: path.join(__dirname, '../preload/editor.js'),
       contextIsolation: true,
@@ -88,7 +118,7 @@ function createWindow() {
     minHeight: 600,
     title: 'Agent Terminal IDE',
     icon: path.join(__dirname, '../build/icon.png'),
-    backgroundColor: '#1e1e1e',
+    ...getGlassWindowOptions(),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -224,6 +254,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerIpcHandlers({ openEditorFile });
+  registerWindowControlHandlers();
   createWindow();
 
   app.on('activate', () => {

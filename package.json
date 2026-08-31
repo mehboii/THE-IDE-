@@ -5,6 +5,7 @@
   "main": "main/index.js",
   "scripts": {
     "start": "electron .",
+    "dev": "electron .",
     "rebuild": "npx @electron/rebuild -v 31.2.0",
     "postinstall": "npx @electron/rebuild -v 31.2.0",
     "dist": "npm run dist:linux",
