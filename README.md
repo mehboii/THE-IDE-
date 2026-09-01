@@ -151,8 +151,8 @@ npm run dist
 ```
 
 The output installers will be generated in the `./dist/` directory:
-- `dist/Agent Terminal IDE-1.0.0.AppImage`
-- `dist/agent-terminal-ide_1.0.0_amd64.deb`
+- `dist/Agent Terminal IDE-4.0.0.AppImage`
+- `dist/agent-terminal-ide_4.0.0_amd64.deb`
 
 ### macOS package
 
