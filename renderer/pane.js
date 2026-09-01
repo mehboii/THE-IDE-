@@ -1,9 +1,12 @@
 class TerminalPane {
-  constructor({ id, label, cwd, agentId, onFocus, onClose, onRestart, onKill, onCwdChange, onAgentChange, onLabelChange, onStatusChange }) {
+  constructor({ id, label, cwd, agentId, agentCommand, customModelId, envVars = {}, onFocus, onClose, onRestart, onKill, onCwdChange, onAgentChange, onLabelChange, onStatusChange }) {
     this.id = id;
     this.label = label || `Pane ${id}`;
     this.cwd = cwd || '';
     this.agentId = agentId || 'shell';
+    this.agentCommand = agentCommand;
+    this.customModelId = customModelId || null;
+    this.envVars = { ...envVars };
     this.status = 'idle'; // running | idle | exited | detached
 
     this.onFocus = onFocus;

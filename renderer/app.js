@@ -9,6 +9,7 @@ class AppController {
     this.focusedPaneId = null;
     this.paneIdCounter = 1;
     this._pendingCreates = 0; // anti-spam: counts in-flight pane creates
+    this.customModelTerminalCreates = new Map(); // prevents duplicate model-terminal launches
     this.sidebarCollapsed = false;
     this.sidebarWidth = 260;
     this.commandPaletteIndex = 0;
@@ -206,7 +207,7 @@ class AppController {
     return this.panes.size + this._pendingCreates;
   }
 
-  async createPane({ id, label, cwd, agentId, customSessionName, customModel, forceNew, trigger = 'new-pane' } = {}) {
+  async createPane({ id, label, cwd, agentId, agentCommand, customSessionName, customModel, customModelId, envVars = {}, forceNew, trigger = 'new-pane' } = {}) {
     if (this.effectivePaneCount() >= 6) {
       this.showBanner('Maximum 6 terminal panes supported simultaneously.');
       return null;
@@ -234,6 +235,9 @@ class AppController {
         label: label || `Pane ${this.panes.size + 1}`,
         cwd: initialCwd,
         agentId: agentId || (agentObj && agentObj.id) || 'shell',
+        agentCommand,
+        customModelId,
+        envVars,
         onFocus: (pId) => this.focusPane(pId),
         onClose: (pId) => this.removePane(pId),
         onRestart: (pId) => this.restartPane(pId, { killTmux: true }),
@@ -261,8 +265,8 @@ class AppController {
         result = await window.electronAPI.createPty({
           paneId,
           cwd: initialCwd,
-          agentCommand: agentObj ? agentObj.command : '',
-          envVars: agentObj ? (agentObj.env || {}) : {},
+          agentCommand: agentCommand !== undefined ? agentCommand : (agentObj ? agentObj.command : ''),
+          envVars: { ...(agentObj ? (agentObj.env || {}) : {}), ...envVars },
           customSessionName,
           // IPC structured cloning may omit undefined object properties.
           // Send an explicit value so ordinary panes cannot reattach to a
@@ -366,8 +370,8 @@ class AppController {
       const result = await window.electronAPI.restartPty({
         paneId,
         cwd: liveRoot,
-        agentCommand: agentObj ? agentObj.command : '',
-        envVars: agentObj ? (agentObj.env || {}) : {},
+        agentCommand: pane.agentCommand !== undefined ? pane.agentCommand : (agentObj ? agentObj.command : ''),
+        envVars: { ...(agentObj ? (agentObj.env || {}) : {}), ...(pane.envVars || {}) },
         trigger,
         cols: dims.cols,
         rows: dims.rows
@@ -416,7 +420,7 @@ class AppController {
 
   async changePaneAgent(paneId, newAgentId) {
     const pane = this.panes.get(paneId);
-    if (pane) pane.agentId = newAgentId;
+    if (pane) { pane.agentId = newAgentId; pane.agentCommand = undefined; }
     await this.restartPane(paneId, { killTmux: true, trigger: 'agent-preset-change' });
   }
 
@@ -731,10 +735,50 @@ class AppController {
     if (this.sidebarCustomModelCount) this.sidebarCustomModelCount.textContent = this.customModels.length;
     if (!this.customModels.length) { this.sidebarCustomModelsList.innerHTML = '<div class="tree-empty">No remote endpoints configured</div>'; return; }
     this.customModels.forEach((model) => {
-      const row = document.createElement('button'); row.type = 'button'; row.className = 'tree-item agent-item';
-      row.innerHTML = `<span class="tree-label">${this.escapeHtml(model.name)}</span><span class="tree-meta">${this.escapeHtml(model.type === 'ollama' ? 'Ollama' : 'OpenAI')}</span>`;
-      row.addEventListener('click', () => this.openCustomModelModal(model)); this.sidebarCustomModelsList.appendChild(row);
+      const row = document.createElement('div'); row.className = 'tree-item agent-item custom-model-item';
+      row.innerHTML = `<span class="tree-label">${this.escapeHtml(model.name)}</span><span class="tree-meta">${this.escapeHtml(model.type === 'ollama' ? 'Ollama' : 'OpenAI')}</span><button class="custom-model-terminal-btn" type="button" title="Open terminal for ${this.escapeHtml(model.name)}" aria-label="Open terminal for ${this.escapeHtml(model.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17 6-5-6-5M12 19h8"/></svg></button>`;
+      row.addEventListener('click', () => this.openCustomModelModal(model));
+      row.querySelector('.custom-model-terminal-btn').addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.openCustomModelTerminal(model);
+      });
+      this.sidebarCustomModelsList.appendChild(row);
     });
+  }
+
+  ollamaHostForModel(model) {
+    const host = String(model.host || '').trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/\/$/, '');
+    const port = String(model.port || '').trim().replace(/^:/, '');
+    if (!host) return '';
+    if (!port || host.endsWith(`:${port}`)) return host;
+    return `${host}:${port}`;
+  }
+
+  async openCustomModelTerminal(model) {
+    const existing = [...this.panes.values()].find((pane) => pane.customModelId === model.id);
+    if (existing) {
+      this.focusPane(existing.id);
+      if (existing.status !== 'running') await this.restartPane(existing.id, { killTmux: true, trigger: 'custom-model-terminal-reconnect' });
+      return existing;
+    }
+
+    const pending = this.customModelTerminalCreates.get(model.id);
+    if (pending) return pending;
+
+    const ollamaHost = this.ollamaHostForModel(model);
+    if (!ollamaHost) {
+      this.showBanner(`Cannot open a terminal for "${model.name}": its host is missing.`, 'error');
+      return null;
+    }
+    const create = this.createPane({
+      label: model.name,
+      agentId: 'shell',
+      customModelId: model.id,
+      envVars: { OLLAMA_HOST: ollamaHost },
+      trigger: 'custom-model-terminal'
+    });
+    this.customModelTerminalCreates.set(model.id, create);
+    try { return await create; } finally { this.customModelTerminalCreates.delete(model.id); }
   }
 
   openCustomModelModal(model = null) {
