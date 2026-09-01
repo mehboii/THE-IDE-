@@ -3,18 +3,58 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self';">
-  <title>Agent Terminal IDE — Editor</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self';">
+  <title>Agent Terminal IDE &mdash; Editor</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="editor.css">
 </head>
 <body class="vscode-dark editor-window-body">
   <main class="editor-window">
     <header class="editor-window-header">
-      <strong>EDITOR</strong><span id="editor-root-label">No folder selected</span>
+      <div class="editor-header-left">
+        <strong>EDITOR</strong><span id="editor-root-label">No folder selected</span>
+      </div>
+      <div class="editor-header-controls">
+        <button id="btn-editor-save" class="editor-btn" type="button" title="Save file (Ctrl+S / Cmd+S)">Save</button>
+        <div class="run-control-dropdown">
+          <button id="btn-editor-run" class="editor-btn run-primary-btn" type="button" title="Run file">Run</button>
+          <button id="btn-editor-run-chevron" class="editor-btn run-chevron-btn" type="button" title="More Run Options">&#x25BC;</button>
+          <div id="run-dropdown-menu" class="run-dropdown-menu hidden">
+            <button id="menu-opt-run" class="run-menu-item" type="button">Run</button>
+            <button id="menu-opt-run-no-debug" class="run-menu-item" type="button">Run Without Debugging <span class="shortcut">Ctrl+F5</span></button>
+            <button id="menu-opt-debug" class="run-menu-item" type="button">Debug <span class="shortcut">F5</span></button>
+          </div>
+        </div>
+        <button id="btn-editor-stop" class="editor-btn stop-btn hidden" type="button" title="Stop execution">Stop</button>
+      </div>
     </header>
     <div class="code-editor-header"><div class="code-editor-tabs-scroll" id="code-editor-tabs"></div></div>
     <div class="monaco-editor-container" id="monaco-editor-container"></div>
+    <div id="run-output-panel" class="run-output-panel hidden">
+      <div class="run-output-header">
+        <div class="run-output-title-group">
+          <strong id="run-output-title">Run Output</strong>
+          <span id="run-output-status" class="run-output-status"></span>
+        </div>
+        <div id="debug-toolbar-controls" class="debug-toolbar-controls hidden">
+          <button id="btn-debug-continue" class="debug-btn" type="button" title="Continue (F5)">Continue</button>
+          <button id="btn-debug-step-over" class="debug-btn" type="button" title="Step Over (F10)">Step Over</button>
+          <button id="btn-debug-step-into" class="debug-btn" type="button" title="Step Into (F11)">Step Into</button>
+          <button id="btn-debug-step-out" class="debug-btn" type="button" title="Step Out (Shift+F11)">Step Out</button>
+        </div>
+        <div class="run-output-actions">
+          <button id="btn-clear-output" class="editor-btn-small" type="button" title="Clear log">Clear</button>
+          <button id="btn-close-output" class="editor-btn-small" type="button" title="Close panel">X</button>
+        </div>
+      </div>
+      <div class="run-output-body">
+        <pre id="run-output-content" class="run-output-content"></pre>
+        <div id="debug-variables-panel" class="debug-variables-panel hidden">
+          <div class="debug-section-title">Variables</div>
+          <div id="debug-variables-list" class="debug-variables-list"></div>
+        </div>
+      </div>
+    </div>
   </main>
   <script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
   <script src="code-editor.js"></script>

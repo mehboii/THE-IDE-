@@ -4,11 +4,30 @@ const agentConfig = require('./agent-config');
 const workspaceStore = require('./workspace-store');
 const customModelStore = require('./custom-model-store');
 const customModelService = require('./custom-model-service');
+const projectRoot = require('./project-root');
 
 function registerIpcHandlers({ openEditorFile } = {}) {
+  // The active project root is deliberately main-process state so the file
+  // tree, PTY spawner, and model tool loop cannot silently drift apart.
+  ipcMain.handle('project-root:get', () => projectRoot.get());
+  ipcMain.handle('project-root:set', (event, root) => {
+    const assigned = projectRoot.set(root);
+    console.log(`[OPENED FOLDER IPC] renderer requested=${JSON.stringify(root)} assigned=${JSON.stringify(assigned)}`);
+    // The editor is a separate renderer. Broadcast its folder changes to the
+    // terminal renderer too, so already-running shells cannot retain a prior
+    // project cwd after File > Open Folder is used in either window.
+    ptyManager.send('project-root:changed', { root: assigned, sourceWebContentsId: event.sender.id });
+    return assigned;
+  });
+
   // PTY session handlers
   ipcMain.handle('pty:create', async (event, params) => {
-    return ptyManager.createSession(params);
+    try {
+      return await ptyManager.createSession(params);
+    } catch (error) {
+      event.sender.send('cwd:warning', { action: params?.trigger || 'unknown-pane-action', error: error.message, cwd: params?.cwd || null, openedFolder: projectRoot.get() });
+      throw error;
+    }
   });
 
   ipcMain.on('pty:write', (event, { paneId, data }) => {
@@ -29,7 +48,12 @@ function registerIpcHandlers({ openEditorFile } = {}) {
     // not a reattach to a dead session. Pass forceNew:false to reattach only.
     const forceNew = params.forceNew !== false;
     await ptyManager.destroySession(params.paneId, forceNew);
-    return ptyManager.createSession({ ...params, forceNew });
+    try {
+      return await ptyManager.createSession({ ...params, forceNew });
+    } catch (error) {
+      event.sender.send('cwd:warning', { action: params?.trigger || 'pane-restart', error: error.message, cwd: params?.cwd || null, openedFolder: projectRoot.get() });
+      throw error;
+    }
   });
 
   // tmux management handlers
@@ -160,14 +184,21 @@ function registerIpcHandlers({ openEditorFile } = {}) {
     }
   };
 
+  function resolveFsPath(targetPath) {
+    if (!targetPath) throw new Error('Could not resolve working directory: no file path was provided.');
+    if (path.isAbsolute(targetPath)) return targetPath;
+    return path.resolve(projectRoot.resolveWorkingDirectory(null, 'filesystem operation'), targetPath);
+  }
+
   ipcMain.handle('fs:read-dir', async (event, dirPath) => {
     try {
-      if (!dirPath || !fs.existsSync(dirPath)) return [];
-      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+      const target = resolveFsPath(dirPath);
+      if (!target || !fs.existsSync(target)) return [];
+      const entries = await fs.promises.readdir(target, { withFileTypes: true });
       const results = entries.map(entry => ({
         name: entry.name,
         isDirectory: entry.isDirectory(),
-        path: path.join(dirPath, entry.name)
+        path: path.join(target, entry.name)
       }));
 
       // Sort directories first, then files alphabetically
@@ -186,7 +217,8 @@ function registerIpcHandlers({ openEditorFile } = {}) {
 
   ipcMain.handle('fs:read-file', async (event, filePath) => {
     try {
-      const content = await fs.promises.readFile(filePath, 'utf8');
+      const target = resolveFsPath(filePath);
+      const content = await fs.promises.readFile(target, { encoding: 'utf8' });
       return { success: true, content };
     } catch (err) {
       return { success: false, error: err.message };
@@ -195,13 +227,18 @@ function registerIpcHandlers({ openEditorFile } = {}) {
 
   ipcMain.handle('fs:write-file', async (event, { filePath, content }) => {
     try {
-      await fs.promises.writeFile(filePath, content, 'utf8');
+      const target = resolveFsPath(filePath);
+      console.log(`[FS WRITE ASSERTION] IPC fs:write-file writing to path: ${target}`);
+      await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      await fs.promises.writeFile(target, content, { encoding: 'utf8' });
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
     }
   });
 
+  // fs.watch accepts both a file and a directory. The Explorer watches its
+  // project root to receive structural changes made by terminal agents.
   ipcMain.handle('fs:watch-file', (event, filePath) => {
     const key = watcherKey(event.sender, filePath);
     if (!filePath || fileWatchers.has(key)) return true;
@@ -235,6 +272,19 @@ function registerIpcHandlers({ openEditorFile } = {}) {
     }
     return true;
   });
+
+  // Runner & Debugger IPC handlers
+  const runner = require('./runner');
+  ipcMain.handle('runner:execute', async (event, payload) => {
+    try {
+      return await runner.execute(event.sender, payload);
+    } catch (error) {
+      event.sender.send('cwd:warning', { action: 'run-or-debug', error: error.message, cwd: payload?.filePath || null, openedFolder: projectRoot.get() });
+      return { success: false, message: error.message };
+    }
+  });
+  ipcMain.handle('runner:stop', (event, runId) => runner.stop(runId));
+  ipcMain.handle('runner:debug-command', (event, { runId, command }) => runner.sendDebugCommand(runId, command));
 }
 
 module.exports = { registerIpcHandlers };

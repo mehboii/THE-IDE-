@@ -1,6 +1,6 @@
 const { spawn } = require('node-pty');
 const { execFile } = require('child_process');
-const fs = require('fs');
+const projectRoot = require('./project-root');
 
 const TMUX_PREFIX = 'ide-';
 
@@ -31,31 +31,43 @@ class PtyManager {
     return { available: result.ok, version: result.ok ? result.stdout.trim() : null, error: result.error };
   }
 
-  async createSession({ paneId, cwd, agentCommand = '', envVars = {}, customSessionName, cols = 80, rows = 24, forceNew = false }) {
+  async createSession({ paneId, cwd, agentCommand = '', envVars = {}, customSessionName, cols = 80, rows = 24, forceNew = true, trigger = 'unknown-pane-action' }) {
     if (!paneId) throw new Error('paneId is required');
     await this.destroySession(paneId, false);
 
-    const safeCwd = cwd && fs.existsSync(cwd) && fs.statSync(cwd).isDirectory() ? cwd : process.cwd();
+    // Once a folder is open, it is the sole cwd authority for every spawn.
+    // Before that, terminal shells start in the user's home directory rather
+    // than failing (or inheriting the IDE installation directory).
+    const safeCwd = projectRoot.resolveTerminalWorkingDirectory(`PTY session ${paneId}`);
+    projectRoot.assertSpawnCwd(safeCwd, `pty:${trigger} pane=${paneId}`);
     const tmux = await this.checkTmuxAvailable();
 
     // Fallback mode when tmux is not installed / not on PATH
     if (!tmux.available) {
-      const shell = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/sh');
-      const args = [];
-      if (agentCommand.trim()) {
-        args.push('-lc', `${agentCommand}; exec "${shell}" -l`);
-      } else {
-        args.push('-l');
-      }
+      const isWindows = process.platform === 'win32';
+      const shell = isWindows ? 'powershell.exe' : (process.env.SHELL || '/bin/sh');
+      // node-pty's cwd is not consistently applied by Windows PowerShell
+      // (it can start at System32). Establish the canonical cwd in PowerShell
+      // itself as well, using -LiteralPath so spaces and [] are never parsed.
+      const powerShellCwdCommand = `Set-Location -LiteralPath '${safeCwd.replace(/'/g, "''")}'`;
+      // PowerShell/cmd do not support the POSIX `-lc` and `-l` flags. Keep
+      // the agent command interactive on Windows, then leave the shell open.
+      const args = isWindows
+        ? ['/NoLogo', '-NoExit', '-Command', agentCommand.trim()
+          ? `${powerShellCwdCommand}; ${agentCommand}`
+          : powerShellCwdCommand]
+        : (agentCommand.trim()
+          ? ['-lc', `${agentCommand}; exec "${shell}" -l`]
+          : ['-l']);
 
       let ptyProcess;
       try {
         ptyProcess = spawn(shell, args, {
-          name: 'xterm-256color',
+          name: isWindows ? 'xterm' : 'xterm-256color',
           cols: Math.max(2, cols),
           rows: Math.max(2, rows),
           cwd: safeCwd,
-          env: { ...process.env, ...envVars, TERM: 'xterm-256color' }
+          env: { ...process.env, ...envVars, ...(isWindows ? {} : { TERM: 'xterm-256color' }) }
         });
       } catch (err) {
         throw new Error(`Failed to spawn fallback PTY for ${paneId}: ${err.message}`);
@@ -74,12 +86,17 @@ class PtyManager {
     // Normal tmux-backed session
     const sessionName = this.sessionName(paneId, customSessionName);
 
-    // forceNew: kill any leftover tmux session so we never reattach to a dead one
+    // A new pane must never attach to an old fixed-name tmux session: tmux then
+    // retains that session's original cwd, even though `-c safeCwd` is supplied.
+    // Existing-session restoration is handled explicitly by the orphan-session
+    // UI, which passes forceNew:false when it truly intends to reattach.
     if (forceNew) {
       await this.killTmuxSession(sessionName).catch(() => {});
     }
 
-    const args = ['new-session', '-A', '-s', sessionName, '-c', safeCwd];
+    const args = forceNew
+      ? ['new-session', '-s', sessionName, '-c', safeCwd]
+      : ['new-session', '-A', '-s', sessionName, '-c', safeCwd];
     if (agentCommand.trim()) {
       args.push('/bin/sh', '-lc', `${agentCommand}; exec "${process.env.SHELL || '/bin/sh'}" -l`);
     }

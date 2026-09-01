@@ -1,6 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Authoritative current project root (owned by the main process)
+  getProjectRoot: () => ipcRenderer.invoke('project-root:get'),
+  setProjectRoot: (root) => ipcRenderer.invoke('project-root:set', root),
+
   // PTY Methods
   createPty: (params) => ipcRenderer.invoke('pty:create', params),
   writePty: (paneId, data) => ipcRenderer.send('pty:write', { paneId, data }),
@@ -18,6 +22,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (event, data) => callback(data);
     ipcRenderer.on('pty-exit', handler);
     return () => ipcRenderer.removeListener('pty-exit', handler);
+  },
+  onCwdWarning: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('cwd:warning', handler);
+    return () => ipcRenderer.removeListener('cwd:warning', handler);
+  },
+  onProjectRootChanged: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('project-root:changed', handler);
+    return () => ipcRenderer.removeListener('project-root:changed', handler);
   },
 
   // tmux Methods
@@ -68,7 +82,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('file-changed', handler);
     return () => ipcRenderer.removeListener('file-changed', handler);
   },
-  openEditorFile: (filePath) => ipcRenderer.invoke('editor:open-file', filePath)
+  openEditorFile: (filePath) => ipcRenderer.invoke('editor:open-file', filePath),
+  controlWindow: (action) => ipcRenderer.invoke('window:control', action)
 });
 
 contextBridge.exposeInMainWorld('__IDE_TEST_MODE__', process.env.IDE_TEST_MODE === '1');

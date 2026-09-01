@@ -5,11 +5,15 @@
   "main": "main/index.js",
   "scripts": {
     "start": "electron .",
+    "dev": "electron .",
     "rebuild": "npx @electron/rebuild -v 31.2.0",
     "postinstall": "npx @electron/rebuild -v 31.2.0",
-    "dist": "electron-builder --linux",
+    "dist": "npm run dist:linux",
+    "dist:linux": "electron-builder --linux AppImage --x64",
     "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win --x64",
     "test:smoke": "node test/smoke.js",
+    "test:external-cwd": "node test/verify-external-cwd.js",
     "test:custom-models": "node test/verify-custom-models.js",
     "test:editor-window": "node test/verify_editor_window.js"
   },
@@ -36,7 +40,7 @@
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.6.0",
+    "@electron/rebuild": "^4.2.0",
     "electron": "^31.2.0",
     "electron-builder": "^24.13.3",
     "playwright": "^1.51.1"
@@ -56,11 +60,16 @@
     ],
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "category": "Development",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "${name}-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [
@@ -69,6 +78,24 @@
       ],
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Agent Terminal IDE"
     }
   }
 }

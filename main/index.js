@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 const path = require('path');
 const ptyManager = require('./pty-manager');
 const { registerIpcHandlers } = require('./ipc-handlers');
@@ -8,6 +8,35 @@ let editorWindow = null;
 let pendingEditorFiles = [];
 let editorReady = false;
 
+function getGlassWindowOptions() {
+  return {
+    transparent: false,
+    backgroundColor: '#101119',
+    frame: true,
+    resizable: true,
+    minimizable: true,
+    maximizable: true,
+    closable: true,
+    ...(process.platform === 'darwin' ? { vibrancy: 'under-window', visualEffectState: 'active' } : {}),
+  };
+}
+
+
+function registerWindowControlHandlers() {
+  ipcMain.handle('window:control', (event, action) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!targetWindow || targetWindow.isDestroyed()) return false;
+
+    if (action === 'minimize') targetWindow.minimize();
+    if (action === 'toggle-maximize') {
+      if (targetWindow.isMaximized()) targetWindow.unmaximize();
+      else targetWindow.maximize();
+    }
+    if (action === 'toggle-fullscreen') targetWindow.setFullScreen(!targetWindow.isFullScreen());
+    if (action === 'close') targetWindow.close();
+    return targetWindow.isMaximized();
+  });
+}
 function sendFileToEditor(filePath) {
   if (!editorWindow || editorWindow.isDestroyed()) return;
   editorWindow.webContents.send('editor:open-file', filePath);
@@ -33,9 +62,9 @@ function openEditorFile(filePath) {
     height: 800,
     minWidth: 700,
     minHeight: 500,
-    title: 'Agent Terminal IDE — Editor',
+    title: 'Agent Terminal IDE \u2014 Editor',
     icon: path.join(__dirname, '../build/icon.png'),
-    backgroundColor: '#1e1e1e',
+    ...getGlassWindowOptions(),
     webPreferences: {
       preload: path.join(__dirname, '../preload/editor.js'),
       contextIsolation: true,
@@ -69,9 +98,9 @@ function createEditorMenu() {
     {
       label: 'File',
       submenu: [
-        { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => callEditor('openFolder') },
+        { label: 'Open Folder\u2026', accelerator: 'CmdOrCtrl+O', click: () => callEditor('openFolder') },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => callEditor('save') },
-        { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => callEditor('saveAs') },
+        { label: 'Save As\u2026', accelerator: 'CmdOrCtrl+Shift+S', click: () => callEditor('saveAs') },
         { type: 'separator' },
         { role: 'close' }
       ]
@@ -88,7 +117,7 @@ function createWindow() {
     minHeight: 600,
     title: 'Agent Terminal IDE',
     icon: path.join(__dirname, '../build/icon.png'),
-    backgroundColor: '#1e1e1e',
+    ...getGlassWindowOptions(),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -173,7 +202,7 @@ function createWindow() {
       label: 'View',
       submenu: [
         {
-          label: 'Command Palette…',
+          label: 'Command Palette\u2026',
           accelerator: 'CmdOrCtrl+Shift+P',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -224,6 +253,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerIpcHandlers({ openEditorFile });
+  registerWindowControlHandlers();
   createWindow();
 
   app.on('activate', () => {

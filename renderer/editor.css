@@ -1,6 +1,77 @@
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-.editor-window-body { background: var(--vscode-editor-background); }
-.editor-window { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; }
-.editor-window-header { height: 32px; display: flex; align-items: center; gap: 12px; padding: 0 12px; color: var(--text-muted); background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); font-size: 12px; }
-.editor-window-header strong { color: var(--text-main); letter-spacing: .08em; }
-.editor-window-header span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-window-body { background: var(--vscode-editor-background, #1e1e1e); color: #cccccc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.editor-window { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; position: relative; }
+.editor-window-header { height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; color: var(--text-muted, #888); background: var(--bg-secondary, #252526); border-bottom: 1px solid var(--border-color, #3c3c3c); font-size: 12px; user-select: none; }
+.editor-header-left { display: flex; align-items: center; gap: 12px; overflow: hidden; }
+.editor-window-header strong { color: var(--text-main, #cccccc); letter-spacing: .08em; font-size: 11px; }
+.editor-window-header span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.8; }
+.editor-header-controls { display: flex; align-items: center; gap: 8px; position: relative; }
+
+/* Editor Buttons */
+.editor-btn { background: #333333; color: #ffffff; border: 1px solid #454545; border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: background 0.15s ease; }
+.editor-btn:hover { background: #444444; border-color: #555555; }
+.editor-btn-small { background: transparent; color: #aaaaaa; border: 1px solid transparent; border-radius: 3px; padding: 2px 6px; font-size: 11px; cursor: pointer; }
+.editor-btn-small:hover { background: #333333; color: #ffffff; }
+
+/* Run Split Control */
+.run-control-dropdown { display: inline-flex; align-items: center; position: relative; }
+.run-primary-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; background: #0e639c; border-color: #1177bb; font-weight: 500; }
+.run-primary-btn:hover { background: #1177bb; }
+.run-chevron-btn { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid rgba(255,255,255,0.2); background: #0e639c; padding: 4px 6px; }
+.run-chevron-btn:hover { background: #1177bb; }
+
+/* Run Dropdown Menu */
+.run-dropdown-menu { position: absolute; top: 100%; right: 0; margin-top: 4px; background: #252526; border: 1px solid #454545; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); z-index: 1000; min-width: 220px; padding: 4px 0; }
+.run-menu-item { width: 100%; text-align: left; background: transparent; border: none; color: #cccccc; padding: 6px 12px; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+.run-menu-item:hover { background: #094771; color: #ffffff; }
+.run-menu-item .shortcut { font-size: 10px; color: #888888; font-weight: normal; }
+
+/* Stop Button */
+.stop-btn { background: #c52929; border-color: #e51400; font-weight: 600; }
+.stop-btn:hover { background: #e51400; }
+
+/* Run Output Panel */
+.run-output-panel { height: 180px; min-height: 100px; background: #1e1e1e; border-top: 1px solid #3c3c3c; display: flex; flex-direction: column; z-index: 100; }
+.run-output-header { height: 28px; background: #252526; border-bottom: 1px solid #333333; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; font-size: 12px; }
+.run-output-title-group { display: flex; align-items: center; gap: 8px; }
+.run-output-status { font-size: 11px; color: #888888; }
+.run-output-actions { display: flex; align-items: center; gap: 4px; }
+.run-output-body { flex: 1; display: flex; overflow: hidden; }
+.run-output-content { flex: 1; margin: 0; padding: 8px 12px; font-family: Consolas, "Courier New", monospace; font-size: 12px; color: #d4d4d4; overflow-y: auto; white-space: pre-wrap; word-break: break-word; background: #1e1e1e; }
+
+/* Debug Toolbar & Panel */
+.debug-toolbar-controls { display: flex; align-items: center; gap: 4px; }
+.debug-btn { background: #2d2d2d; color: #d7ba7d; border: 1px solid #454545; border-radius: 3px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+.debug-btn:hover { background: #3c3c3c; color: #ffffff; }
+.debug-variables-panel { width: 220px; border-left: 1px solid #333333; background: #252526; padding: 6px; display: flex; flex-direction: column; overflow-y: auto; font-size: 11px; }
+.debug-section-title { font-weight: bold; color: #569cd6; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; margin-bottom: 4px; }
+.debug-var-item { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid #2d2d2d; font-family: monospace; }
+.debug-var-name { color: #9cdcfe; }
+.debug-var-val { color: #ce9178; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 130px; }
+
+/* Monaco Breakpoint & Active Line Glyphs */
+.monaco-breakpoint-glyph { background: #e51400 !important; border-radius: 50% !important; width: 10px !important; height: 10px !important; margin-left: 5px !important; margin-top: 4px !important; cursor: pointer; }
+.monaco-debug-active-line { background: rgba(255, 255, 0, 0.15) !important; border-left: 3px solid #ffcc00 !important; }
+.hidden { display: none !important; }
+
+/* Liquid Glass chrome; the Monaco editor and execution output remain opaque. */
+.editor-window-body { background: radial-gradient(circle at 6% 0%, rgba(93,122,210,.24), transparent 30%), linear-gradient(145deg, #101119, #171926 48%, #0d0e14); }
+.editor-window { gap: 8px; padding: 8px; }
+.editor-window-header, .code-editor-header, .run-output-header, .debug-variables-panel, .run-dropdown-menu { background-color: rgba(28,30,42,.62); background-image: linear-gradient(180deg, rgba(255,255,255,.075), transparent 70%); border: 1px solid rgba(255,255,255,.11); box-shadow: inset 0 1px rgba(255,255,255,.09), 0 8px 25px rgba(0,0,0,.26); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); }
+.editor-window-header { min-height: 36px; border-radius: 12px; }
+.code-editor-header { min-height: 35px; border-radius: 12px; overflow: hidden; }
+.editor-btn, .editor-btn-small, .debug-btn { border-radius: 9px; border-color: rgba(255,255,255,.11); background-color: rgba(54,57,75,.68); background-image: linear-gradient(180deg, rgba(255,255,255,.08), transparent 70%); box-shadow: inset 0 1px rgba(255,255,255,.10), 0 3px 10px rgba(0,0,0,.16); transition: transform 180ms cubic-bezier(.2,.8,.2,1), filter 180ms cubic-bezier(.2,.8,.2,1), box-shadow 180ms cubic-bezier(.2,.8,.2,1), background-color 180ms cubic-bezier(.2,.8,.2,1); }
+.editor-btn:hover, .editor-btn-small:hover, .debug-btn:hover { transform: translateY(-1px) scale(1.02); filter: brightness(1.12); box-shadow: inset 0 1px rgba(255,255,255,.15), 0 7px 16px rgba(0,0,0,.25); }
+.run-primary-btn, .run-chevron-btn { background-color: rgba(43,113,187,.82); }
+.run-dropdown-menu { border-radius: 12px; overflow: hidden; }
+.run-menu-item { transition: background 180ms ease-out, transform 180ms ease-out; }
+.run-menu-item:hover { background: rgba(97,133,235,.55); transform: translateX(2px); }
+.run-output-panel { border-top: 0; border-radius: 12px 12px 0 0; overflow: hidden; background: #1e1e1e; }
+.run-output-header, .debug-variables-panel { border-radius: 0; }
+
+/* Midnight Ember editor shell */
+.editor-window-body { background: radial-gradient(ellipse 56% 46% at 0% 0%, #2B1612, transparent 67%), #06070D; color: #FFF7F0; }
+.editor-window-header, .code-editor-header, .run-output-header, .debug-variables-panel, .run-dropdown-menu { background-color: rgba(13,13,21,.82); border-color: #252532; }
+.editor-btn, .editor-btn-small, .debug-btn { background-color: #0D0D15; border-color: #252532; color: #FFF7F0; }
+.run-primary-btn, .run-chevron-btn { background-color: #3A1711; border-color: rgba(255,107,50,.55); }
+.run-menu-item:hover { background: #3A1711; }

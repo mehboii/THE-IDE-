@@ -1,6 +1,6 @@
-# Agent Terminal IDE
+# Agent Terminal IDE.
 
-> **Desktop Terminal IDE for launching, managing, and multiplexing multiple CLI coding agents (Claude Code, Codex CLI, Aider) in a high-performance grid layout.**
+> **Desktop Terminal IDE for launching, managing, and multiplexing multiple CLI coding agents (Claude Code, Codex CLI, Aider) in a high-performance grid layout for Windows, macOS, and Linux.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Electron](https://img.shields.io/badge/Electron-31.2.0-blue)
@@ -9,7 +9,7 @@
 
 ---
 
-## ⚡ Core Features
+## Core Features.
 
 - **Dynamic Terminal Grid Layout**: Manage 4–6 terminal panes simultaneously arranged in **2x3** or **3x2** layout grids with real-time xterm.js reflowing on window and pane resize.
 - **tmux Persistent Backend**: Every terminal session is backed by a detached tmux session (`tmux new-session -A -s ide-<uuid>`). If the app crashes or quits, your CLI agent tasks continue executing in the background and reattach seamlessly upon app restart with scrollback intact.
@@ -22,7 +22,7 @@
 
 ---
 
-## 🛠️ Prerequisites & Installation
+## Prerequisites & Installation
 
 ### 1. Prerequisites
 - **Node.js**: Version 18 or 20+
@@ -66,7 +66,7 @@ npm run rebuild
 
 ---
 
-## 🚀 Running the App
+## Running the App
 
 ```bash
 # Start Electron application locally
@@ -80,7 +80,7 @@ npm run rebuild
 
 ---
 
-## 🧠 How tmux Session Persistence Works
+## How tmux Session Persistence Works
 
 Unlike standard terminal emulators that terminate shell processes when closed, **Agent Terminal IDE** leverages `tmux` as an IPC session daemon under the hood:
 
@@ -95,7 +95,7 @@ Unlike standard terminal emulators that terminate shell processes when closed, *
 
 ---
 
-## ⚙️ Adding Custom CLI Agent Presets
+## Adding Custom CLI Agent Presets
 
 Preset options are configured via JSON and loaded dynamically. You can add new CLI agent tools (e.g. custom Python scripts, GPT-Engineer, or Aider variants) without editing application code.
 
@@ -128,7 +128,7 @@ Agent presets can also be saved in your user data directory (`<userData>/user_ag
 
 ---
 
-## ⌨️ Keyboard Shortcuts Reference
+## Keyboard Shortcuts Reference
 
 | Shortcut | Action |
 | :--- | :--- |
@@ -141,18 +141,38 @@ Agent presets can also be saved in your user data directory (`<userData>/user_ag
 
 ---
 
-## 📦 Building & Packaging for Linux
+## Building & Packaging for Linux
 
-The project is pre-configured with `electron-builder` to package Linux distribution targets (**AppImage** and **.deb**).
+The Linux release is an **x64 AppImage**, a self-contained executable that works across mainstream Linux distributions (Ubuntu, Debian, Fedora, Arch, Mint, openSUSE, and others). It must be built on Linux so the native `node-pty` dependency is compiled for Linux; use the included GitHub Actions workflow for builds from Windows or macOS.
 
 ```bash
-# Build production AppImage and deb packages for Linux
+# Build the portable Linux AppImage from a Linux machine
 npm run dist
 ```
 
-The output installers will be generated in the `./dist/` directory:
-- `dist/Agent Terminal IDE-4.0.0.AppImage`
-- `dist/agent-terminal-ide_4.0.0_amd64.deb`
+The output will be generated in the `./dist/` directory:
+- `dist/agent-terminal-ide-4.0.0-x64.AppImage`
+
+On GitHub, run the **Build Linux AppImage** workflow manually or push a version tag. A tag such as `v4.0.0` also creates a GitHub Release with the AppImage attached, so users can download the latest release with the GitHub CLI:
+
+```bash
+gh release download --repo mehboii/THE-IDE- --pattern '*.AppImage'
+```
+
+To download a particular version, replace `v4.0.0` below with its release tag:
+
+```bash
+gh release download v4.0.0 --repo mehboii/THE-IDE- --pattern '*.AppImage'
+```
+
+Manual workflow runs provide the `linux-appimage-x64` Actions artifact instead. On the target machine:
+
+```bash
+chmod +x agent-terminal-ide-*-x64.AppImage
+./agent-terminal-ide-*-x64.AppImage
+```
+
+The target machine still needs `tmux` installed for persistent terminal sessions. On distributions with FUSE 2 unavailable, AppImages can be launched with `APPIMAGE_EXTRACT_AND_RUN=1 ./agent-terminal-ide-*-x64.AppImage`.
 
 ### macOS package
 
@@ -162,9 +182,25 @@ npm run dist:mac
 
 This creates a `.dmg` and `.zip` in `dist/`. Local unsigned builds may trigger Gatekeeper when opened on another Mac; signing and notarization require your Apple Developer certificate and credentials and are intentionally not configured in this repository.
 
+### Windows installer
+
+Windows uses the built-in terminal fallback (PowerShell); `tmux` persistence is
+not required or used on Windows. From a Windows machine, build a 64-bit NSIS
+installer with:
+
+```powershell
+npm install
+npm run dist:win
+```
+
+The installable executable is written to `dist/Agent Terminal IDE-<version>-Setup.exe`.
+It lets the user choose an installation folder and creates Start Menu and desktop shortcuts.
+Windows SmartScreen may show a warning for this unsigned build. Code signing is
+needed before distributing the installer broadly.
+
 ---
 
-## 🧪 End-to-end smoke test
+## End-to-end smoke test
 
 The smoke suite launches Electron through Playwright, verifies the initial four-pane grid, writes `echo hello-sandbox-test` through the real `node-pty` bridge, verifies that killing a pane kills its `ide-*` tmux session, then restarts Electron and reattaches a surviving session.
 
@@ -183,7 +219,7 @@ The test requires a functioning Electron binary, `tmux`, and Xvfb. It cleans up 
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 .
@@ -210,6 +246,6 @@ The test requires a functioning Electron binary, `tmux`, and Xvfb. It cleans up 
 
 ---
 
-## 📄 License
+## License
 
 Distributed under the MIT License. See `LICENSE` for details.

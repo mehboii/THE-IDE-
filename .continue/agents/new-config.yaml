@@ -1,0 +1,13 @@
+name: My Config
+version: 0.0.1
+schema: v1
+models:
+  - name: Gemma (Phone)
+    provider: ollama
+    model: gemma
+    apiBase: http://192.168.1.45:11500
+    roles:
+      - chat
+      - edit
+      - apply
+      

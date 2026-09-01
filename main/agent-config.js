@@ -12,13 +12,13 @@ class AgentConfig {
     try {
       // First check user custom config in userData
       if (fs.existsSync(this.userConfigPath)) {
-        const raw = fs.readFileSync(this.userConfigPath, 'utf-8');
+        const raw = fs.readFileSync(this.userConfigPath, { encoding: 'utf8' });
         return JSON.parse(raw).agents || [];
       }
       
       // Fallback to pre-bundled config
       if (fs.existsSync(this.defaultConfigPath)) {
-        const raw = fs.readFileSync(this.defaultConfigPath, 'utf-8');
+        const raw = fs.readFileSync(this.defaultConfigPath, { encoding: 'utf8' });
         return JSON.parse(raw).agents || [];
       }
     } catch (err) {

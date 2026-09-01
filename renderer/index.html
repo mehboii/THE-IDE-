@@ -66,9 +66,8 @@
           <!-- Files section (collapsible file tree) -->
           <div class="sidebar-section" data-section="files">
             <button class="sidebar-section-header" type="button" data-toggle-section="files">
-              <span class="codicon-chevron expanded">▸</span>
               <span>FILES & FOLDERS</span>
-              <button id="btn-sidebar-open-folder" class="icon-btn-sm" type="button" title="Open Folder" onclick="event.stopPropagation()">📁</button>
+              <button id="btn-sidebar-open-folder" class="icon-btn-sm" type="button" title="Open Folder" onclick="event.stopPropagation()">Open</button>
             </button>
             <div class="sidebar-section-content" id="sidebar-file-tree">
               <!-- Populated dynamically by FileExplorer -->
@@ -78,7 +77,6 @@
           <!-- Terminal Sessions section -->
           <div class="sidebar-section" data-section="sessions">
             <button class="sidebar-section-header" type="button" data-toggle-section="sessions">
-              <span class="codicon-chevron expanded">▸</span>
               <span>TERMINAL SESSIONS</span>
               <span class="section-badge" id="sidebar-pane-count">0</span>
             </button>
@@ -90,7 +88,6 @@
           <!-- Workspace Presets section -->
           <div class="sidebar-section" data-section="workspaces">
             <button class="sidebar-section-header" type="button" data-toggle-section="workspaces">
-              <span class="codicon-chevron expanded">▸</span>
               <span>WORKSPACES</span>
             </button>
             <div class="sidebar-section-content" id="sidebar-workspaces-list">
@@ -101,7 +98,6 @@
           <!-- Agent Presets section -->
           <div class="sidebar-section" data-section="agents">
             <button class="sidebar-section-header" type="button" data-toggle-section="agents">
-              <span class="codicon-chevron expanded">▸</span>
               <span>AGENT PRESETS</span>
             </button>
             <div class="sidebar-section-content" id="sidebar-agents-list">
@@ -109,7 +105,7 @@
             </div>
           </div>
           <div class="sidebar-section" data-section="custom-models">
-            <button class="sidebar-section-header" type="button" data-toggle-section="custom-models"><span class="codicon-chevron expanded">▶</span><span>Custom Models</span><span class="section-badge" id="sidebar-custom-model-count">0</span></button>
+            <button class="sidebar-section-header" type="button" data-toggle-section="custom-models"><span>Custom Models</span><span class="section-badge" id="sidebar-custom-model-count">0</span></button>
             <div class="sidebar-section-content" id="sidebar-custom-models-list"></div>
             <button id="btn-add-custom-model" class="tree-item" type="button">+ Add custom endpoint</button>
           </div>
@@ -123,11 +119,11 @@
         <div class="editor-toolbar" id="editor-toolbar">
           <div class="toolbar-left">
             <div class="grid-preset-selector" role="group" aria-label="Grid layout">
-              <button id="btn-preset-2x3" class="btn-tab active" type="button" title="2 Rows × 3 Columns">2×3</button>
-              <button id="btn-preset-3x2" class="btn-tab" type="button" title="3 Rows × 2 Columns">3×2</button>
+              <button id="btn-preset-2x3" class="btn-tab active" type="button" title="2 Rows &times; 3 Columns">2&times;3</button>
+              <button id="btn-preset-3x2" class="btn-tab" type="button" title="3 Rows &times; 2 Columns">3&times;2</button>
             </div>
             <select id="workspace-select" class="select-input" title="Load workspace" aria-label="Workspace">
-              <option value="">— Workspace —</option>
+              <option value="">&mdash; Workspace &mdash;</option>
             </select>
             <button id="btn-save-workspace" class="btn btn-secondary" type="button" title="Save workspace">Save</button>
             <button id="btn-delete-workspace" class="btn btn-ghost" type="button" title="Delete workspace">Delete</button>
@@ -149,7 +145,7 @@
         <!-- Notification banner -->
         <div id="notification-banner" class="banner banner-warning hidden" role="alert">
           <span id="banner-message">Warning</span>
-          <button id="banner-close" class="banner-close" type="button" aria-label="Dismiss">×</button>
+          <button id="banner-close" class="banner-close" type="button" aria-label="Dismiss">&times;</button>
         </div>
 
         <!-- The main window is terminal-only. File clicks open the separate editor BrowserWindow. -->
@@ -167,8 +163,8 @@
     <footer class="status-bar" id="status-bar" role="status">
       <div class="status-bar-left">
         <span class="status-item" id="status-tmux" title="tmux connection status">
-          <span class="status-icon">⬡</span>
-          <span id="tmux-status-badge">tmux …</span>
+          <span class="status-icon">&#x2B21;</span>
+          <span id="tmux-status-badge">tmux &hellip;</span>
         </span>
         <span class="status-item" id="active-panes-count">Sessions: 0/6</span>
         <span class="status-item" id="status-broadcast" title="Broadcast mode">
@@ -187,7 +183,7 @@
   <!-- Command Palette (Ctrl+Shift+P) -->
   <div id="command-palette" class="command-palette hidden" role="dialog" aria-modal="true" aria-label="Command Palette">
     <div class="command-palette-box">
-      <input type="text" id="command-palette-input" class="command-palette-input" placeholder="Type a command…" autocomplete="off" spellcheck="false" />
+      <input type="text" id="command-palette-input" class="command-palette-input" placeholder="Type a command&hellip;" autocomplete="off" spellcheck="false" />
       <ul id="command-palette-list" class="command-palette-list" role="listbox"></ul>
     </div>
   </div>
@@ -200,7 +196,7 @@
     <div class="modal-box">
       <div class="modal-header">
         <h3>Orphaned tmux Sessions</h3>
-        <button class="modal-close" id="modal-orphans-close" type="button" aria-label="Close">×</button>
+        <button class="modal-close" id="modal-orphans-close" type="button" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
         <p>Persistent agent sessions from a previous run were found. Reattach to restore scrollback, or kill them.</p>
@@ -218,14 +214,14 @@
     <div class="modal-box">
       <div class="modal-header">
         <h3>Keyboard Shortcuts</h3>
-        <button class="modal-close" id="modal-help-close" type="button" aria-label="Close">×</button>
+        <button class="modal-close" id="modal-help-close" type="button" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
         <table class="shortcuts-table">
           <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
           <tbody>
             <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Command Palette</td></tr>
-            <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>6</kbd></td><td>Focus pane 1–6</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd>&hellip;<kbd>6</kbd></td><td>Focus pane 1&ndash;6</td></tr>
             <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>New terminal pane</td></tr>
             <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></td><td>Close focused pane</td></tr>
             <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd></td><td>Toggle broadcast</td></tr>
@@ -247,7 +243,7 @@
     <div class="modal-box">
       <div class="modal-header">
         <h3 id="run-agent-title">Run CLI Agent</h3>
-        <button class="modal-close" id="modal-run-agent-close" type="button" aria-label="Close">×</button>
+        <button class="modal-close" id="modal-run-agent-close" type="button" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
         <p>Select a CLI agent or remote custom model:</p>
@@ -268,7 +264,7 @@
   </div>
 
   <div id="modal-custom-model" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="Custom Model Configuration">
-    <div class="modal-box"><div class="modal-header"><h3 id="custom-model-title">Custom Model</h3><button class="modal-close" id="modal-custom-model-close" type="button">×</button></div>
+    <div class="modal-box"><div class="modal-header"><h3 id="custom-model-title">Custom Model</h3><button class="modal-close" id="modal-custom-model-close" type="button">&times;</button></div>
       <form id="custom-model-form" class="modal-body custom-model-form">
         <label>Display name <input name="name" class="text-input" required></label><label>Host / IP <input name="host" class="text-input" placeholder="192.168.1.20" required></label><label>Port <input name="port" class="text-input" placeholder="11434" required></label>
         <label>Protocol <select name="type" class="select-input"><option value="ollama">Ollama API</option><option value="openai">OpenAI-Compatible API</option></select></label><label>Model name / tag <input name="model" class="text-input" placeholder="llama3:70b" required></label><label>API key (optional) <input name="apiKey" class="text-input" type="password"></label>

@@ -107,6 +107,18 @@ class AppController {
     this.fileExplorer.onFileSelect((filePath) => {
       window.electronAPI.openEditorFile(filePath);
     });
+    this.fileExplorer.onRootChange(async (dirPath) => {
+      // This assignment is the renderer-to-main handoff for the one true
+      // execution root. Awaiting it prevents a pane launch from racing Open
+      // Folder and using an earlier pane-local/default cwd.
+      const canonicalRoot = await window.electronAPI.setProjectRoot(dirPath);
+      console.info('[OPENED FOLDER] Renderer confirmed project root:', canonicalRoot);
+      return canonicalRoot;
+    });
+
+    // Restore the explorer as a view of the authoritative main-process root.
+    const projectRoot = await window.electronAPI.getProjectRoot();
+    if (projectRoot) await this.fileExplorer.setRootDirectory(projectRoot);
 
     const orphans = await window.electronAPI.listOrphans();
     if (orphans && orphans.length > 0 && !window.__IDE_TEST_MODE__) {
@@ -136,12 +148,22 @@ class AppController {
         const next = status === 'detached' ? 'detached' : 'exited';
         pane.setStatus(next);
         this.showBanner(
-          `Session for "${pane.label}" ended (code ${exitCode ?? '?'}). tmux may have been killed externally — use Restart to recover.`,
+          `Session for "${pane.label}" ended (code ${exitCode ?? '?'}). tmux may have been killed externally \u2014 use Restart to recover.`,
           'error'
         );
         this.renderEditorTabs();
         this.renderSidebarSessions();
       }
+    });
+    window.electronAPI.onCwdWarning(({ action, error, cwd, openedFolder }) => {
+      this.showBanner(`Working-directory safety check blocked ${action}: ${error} Requested: ${cwd || '(none)'}; opened folder: ${openedFolder || '(none)'}.`, 'error');
+    });
+    window.electronAPI.onProjectRootChanged(({ root }) => {
+      // Includes File > Open Folder initiated by the detached editor window.
+      // Queue rather than overlap restarts when users switch folders quickly.
+      this._rootSync = (this._rootSync || Promise.resolve())
+        .then(() => this.syncPanesToOpenedFolder(root))
+        .catch((error) => this.showBanner(`Could not apply opened folder to terminals: ${error.message}`, 'error'));
     });
     window.electronAPI.onCustomModelToken(({ paneId, token }) => this.panes.get(paneId)?.receiveToken?.(token));
     window.electronAPI.onCustomModelDone(({ paneId }) => this.panes.get(paneId)?.receiveDone?.());
@@ -162,7 +184,7 @@ class AppController {
       this.tmuxStatusBadge.className = 'badge badge-danger';
       if (this.statusBar) this.statusBar.classList.add('tmux-missing');
       this.showBanner(
-        'tmux not found — install it to enable session persistence across restarts: `brew install tmux` (macOS) or `sudo apt install tmux` (Linux). Continuing without persistence for now.',
+        'tmux not found \u2014 install it to enable session persistence across restarts: `brew install tmux` (macOS) or `sudo apt install tmux` (Linux). Continuing without persistence for now.',
         'warning'
       );
     }
@@ -184,7 +206,7 @@ class AppController {
     return this.panes.size + this._pendingCreates;
   }
 
-  async createPane({ id, label, cwd, agentId, customSessionName, customModel } = {}) {
+  async createPane({ id, label, cwd, agentId, customSessionName, customModel, forceNew, trigger = 'new-pane' } = {}) {
     if (this.effectivePaneCount() >= 6) {
       this.showBanner('Maximum 6 terminal panes supported simultaneously.');
       return null;
@@ -202,7 +224,10 @@ class AppController {
 
       if (customModel) return this.createCustomModelPane({ id: paneId, label, customModel, cwd });
       const agentObj = this.agentsList.find((a) => a.id === agentId) || this.agentsList.find((a) => a.id === 'shell') || this.agentsList[0];
-      const initialCwd = cwd || '';
+      // An open Explorer folder is authoritative for every new process. Until
+      // one is opened, the main process starts the terminal in the user's home
+      // directory; never use a persisted pane or workspace cwd as a fallback.
+      const initialCwd = await window.electronAPI.getProjectRoot();
 
       const pane = new TerminalPane({
         id: paneId,
@@ -239,6 +264,11 @@ class AppController {
           agentCommand: agentObj ? agentObj.command : '',
           envVars: agentObj ? (agentObj.env || {}) : {},
           customSessionName,
+          // IPC structured cloning may omit undefined object properties.
+          // Send an explicit value so ordinary panes cannot reattach to a
+          // fixed-name tmux session from an earlier launch.
+          forceNew: forceNew !== false,
+          trigger,
           cols: dims.cols,
           rows: dims.rows
         });
@@ -267,10 +297,15 @@ class AppController {
   }
 
   async createCustomModelPane({ id, label, customModel, cwd }) {
-    const pane = new CustomModelPane({ id, label: label || customModel.name, model: customModel, cwd,
+    // An open Explorer folder is authoritative for every new chat/tool pane.
+    // A chat pane may be displayed before a project is opened, but it must not
+    // inherit a stale saved pane cwd. Tool execution re-resolves ProjectRoot in
+    // the main process immediately before it runs.
+    const initialCwd = await window.electronAPI.getProjectRoot() || '';
+    const pane = new CustomModelPane({ id, label: label || customModel.name, model: customModel, cwd: initialCwd,
       onFocus: (pId) => this.focusPane(pId), onClose: (pId) => this.removePane(pId),
       onRestart: (pId) => this.restartPane(pId), onKill: (pId) => this.killPaneSession(pId),
-      onCwdChange: (pId, newCwd) => { this.panes.get(pId)?.setCwd(newCwd); },
+      onCwdChange: (pId, newCwd) => this.changePaneCwd(pId, newCwd),
       onLabelChange: () => { this.renderEditorTabs(); this.renderSidebarSessions(); },
       onStatusChange: () => { this.renderEditorTabs(); this.renderSidebarSessions(); } });
     await pane.init(); this.panes.set(id, pane); this.gridManager.addPaneToGrid(pane); this.focusPane(id);
@@ -307,7 +342,7 @@ class AppController {
    * Restart pane. When killTmux is true (default for UI Restart), kill the old
    * tmux session first so -A does not reattach to a dead/stale session.
    */
-  async restartPane(paneId, { killTmux = true } = {}) {
+  async restartPane(paneId, { killTmux = true, trigger = 'pane-restart' } = {}) {
     const pane = this.panes.get(paneId);
     if (!pane) return;
 
@@ -321,14 +356,23 @@ class AppController {
       if (killTmux) {
         await window.electronAPI.destroyPty(paneId, true);
       }
-      await window.electronAPI.restartPty({
+      // Read the live main-process state at the instant of spawning. Pane.cwd
+      // is presentation state only and is never allowed to select a process
+      // working directory.
+      const liveRoot = await window.electronAPI.getProjectRoot();
+      // A missing project root is valid for ordinary terminal shells: the
+      // main process chooses the safe home-directory fallback in that case.
+      if (liveRoot) pane.setCwd(liveRoot);
+      const result = await window.electronAPI.restartPty({
         paneId,
-        cwd: pane.cwd,
+        cwd: liveRoot,
         agentCommand: agentObj ? agentObj.command : '',
         envVars: agentObj ? (agentObj.env || {}) : {},
+        trigger,
         cols: dims.cols,
         rows: dims.rows
       });
+      if (result?.cwd) pane.setCwd(result.cwd);
       pane.setStatus('running');
       // Refit after restart so PTY gets correct size
       requestAnimationFrame(() => pane.fit());
@@ -361,15 +405,19 @@ class AppController {
   }
 
   async changePaneCwd(paneId, newCwd) {
-    const pane = this.panes.get(paneId);
-    if (pane) pane.setCwd(newCwd);
-    await this.restartPane(paneId, { killTmux: true });
+    // The pane folder picker changes the shared opened folder; it does not
+    // introduce a second, hidden execution root for one pane.
+    if (newCwd && this.fileExplorer) {
+      await this.fileExplorer.setRootDirectory(newCwd, true);
+      return;
+    }
+    await this.restartPane(paneId, { killTmux: true, trigger: 'pane-folder-change' });
   }
 
   async changePaneAgent(paneId, newAgentId) {
     const pane = this.panes.get(paneId);
     if (pane) pane.agentId = newAgentId;
-    await this.restartPane(paneId, { killTmux: true });
+    await this.restartPane(paneId, { killTmux: true, trigger: 'agent-preset-change' });
   }
 
   focusPane(paneId) {
@@ -388,10 +436,26 @@ class AppController {
       await this.createPane({
         id: `pane-${i}`,
         label: `Shell ${i}`,
-        agentId: 'shell'
+        agentId: 'shell',
+        trigger: 'app-boot-default-shell'
       });
     }
     this.paneIdCounter = Math.max(this.paneIdCounter, count + 1);
+  }
+
+  async syncPanesToOpenedFolder(canonicalRoot) {
+    if (!canonicalRoot) return;
+    for (const pane of this.panes.values()) {
+      pane.setCwd(canonicalRoot);
+      // Chat panes do not spawn child processes. Future tool calls read the
+      // main-process ProjectRoot again, while terminal sessions must restart
+      // immediately so manually entered Codex/Claude/Aider commands cannot
+      // retain the pre-opened app/install cwd.
+      if (!(pane instanceof CustomModelPane)) {
+        await this.restartPane(pane.id, { killTmux: true, trigger: 'opened-folder-sync' });
+      }
+    }
+    this.showBanner(`Opened folder: ${canonicalRoot}. All terminal sessions now use this working directory.`);
   }
 
   async killAllSessions() {
@@ -405,7 +469,7 @@ class AppController {
     }
     // Mark all panes exited, then clear the grid (which calls destroy on each)
     for (const pane of this.panes.values()) {
-      pane.status = 'exited'; // raw set — don't trigger callbacks on dead panes
+      pane.status = 'exited'; // raw set \u2014 don't trigger callbacks on dead panes
     }
     this.panes.clear();
     this.gridManager.clearAll();
@@ -433,6 +497,7 @@ class AppController {
           id: sName.replace(/^ide-/, ''),
           label: sName,
           customSessionName: sName,
+          forceNew: false,
           agentId: 'shell'
         });
         e.currentTarget.closest('li').remove();
@@ -451,6 +516,7 @@ class AppController {
         id: sessionName.replace(/^ide-/, ''),
         label: sessionName,
         customSessionName: sessionName,
+        forceNew: false,
         agentId: 'shell'
       });
     }
@@ -459,7 +525,7 @@ class AppController {
 
   async loadWorkspaceOptions() {
     this.workspaces = await window.electronAPI.getWorkspaces() || {};
-    this.workspaceSelect.innerHTML = '<option value="">— Workspace —</option>';
+    this.workspaceSelect.innerHTML = '<option value="">\u2014 Workspace \u2014</option>';
     for (const name of Object.keys(this.workspaces)) {
       const opt = document.createElement('option');
       opt.value = name;
@@ -572,7 +638,7 @@ class AppController {
       tab.innerHTML = `
         <span class="editor-tab-icon">&gt;_</span>
         <span class="editor-tab-label" title="${this.escapeHtml(pane.label)}">${this.escapeHtml(pane.label)}</span>
-        <button class="editor-tab-action" type="button" title="Close" aria-label="Close ${this.escapeHtml(pane.label)}">×</button>
+        <button class="editor-tab-action" type="button" title="Close" aria-label="Close ${this.escapeHtml(pane.label)}">\u00D7</button>
       `;
 
       tab.addEventListener('click', (e) => {
@@ -712,7 +778,7 @@ class AppController {
     if (this.modalRunAgent) this.modalRunAgent.classList.add('hidden');
   }
 
-  executeAgent({ targetPaneId, agentId, scope }) {
+  async executeAgent({ targetPaneId, agentId, scope }) {
     if (agentId.startsWith('custom:')) {
       const model = this.customModels.find((m) => m.id === agentId.slice(7));
       if (!model) return this.showBanner('That custom model no longer exists.', 'error');
@@ -729,15 +795,32 @@ class AppController {
     const agentObj = this.agentsList.find((a) => a.id === agentId);
     if (!agentObj) return;
 
-    const cmd = agentObj.command || '';
+    const startInProjectRoot = async (pane) => {
+      // Run Agent starts a new CLI session in the open project, even when the
+      // target is a default pane that was created before Open Folder. This
+      // uses the same main-process root resolution as ordinary new panes.
+      const projectRoot = await window.electronAPI.getProjectRoot();
+      if (!projectRoot) throw new Error('Could not resolve working directory: open a project folder before running an agent.');
+      if (pane.cwd !== projectRoot) await this.changePaneCwd(pane.id, projectRoot);
+      if (this.panes.get(pane.id)?.cwd !== projectRoot) throw new Error(`Could not resolve working directory: pane did not restart in ${projectRoot}.`);
+    };
+
+    // Launch the chosen CLI by replacing the PTY session instead of typing a
+    // command into an old shell. This makes the main process the observable
+    // spawn point and guarantees the command cannot inherit a stale cwd.
+    const launchInPane = async (pane, trigger) => {
+      await startInProjectRoot(pane);
+      pane.agentId = agentObj.id;
+      await this.restartPane(pane.id, { killTmux: true, trigger });
+      if (this.panes.get(pane.id)?.cwd !== await window.electronAPI.getProjectRoot()) {
+        throw new Error('Could not resolve working directory: agent session did not start in the opened folder.');
+      }
+    };
 
     if (scope === 'single') {
       const pane = this.panes.get(targetPaneId);
       if (pane) {
-        if (cmd.trim()) {
-          window.electronAPI.writePty(pane.id, cmd + '\r');
-        }
-        pane.agentId = agentObj.id;
+        try { await launchInPane(pane, 'run-agent-button'); } catch (error) { this.showBanner(error.message, 'error'); return; }
         pane.label = agentObj.name;
         pane.labelInput.value = agentObj.name;
         pane.agentSelect.value = agentObj.id;
@@ -745,10 +828,7 @@ class AppController {
     } else if (scope === 'all') {
       let idx = 1;
       for (const pane of this.panes.values()) {
-        if (cmd.trim()) {
-          window.electronAPI.writePty(pane.id, cmd + '\r');
-        }
-        pane.agentId = agentObj.id;
+        try { await launchInPane(pane, 'run-agent-all'); } catch (error) { this.showBanner(error.message, 'error'); return; }
         const nameLabel = this.panes.size > 1 ? `${agentObj.name} ${idx++}` : agentObj.name;
         pane.label = nameLabel;
         pane.labelInput.value = nameLabel;
@@ -774,7 +854,7 @@ class AppController {
     this.sidebarCollapsed = force != null ? force : !this.sidebarCollapsed;
     if (this.sideBar) this.sideBar.classList.toggle('collapsed', this.sidebarCollapsed);
     if (this.appShell) this.appShell.classList.toggle('sidebar-collapsed', this.sidebarCollapsed);
-    // Reflow terminals after layout change — use transitionend for animated sidebar
+    // Reflow terminals after layout change \u2014 use transitionend for animated sidebar
     const onDone = () => {
       this.gridManager && this.gridManager.reflowAll();
     };
@@ -822,9 +902,9 @@ class AppController {
       { id: 'broadcast', label: 'Terminal: Toggle Broadcast Mode', accel: 'Ctrl+Shift+B', run: () => window.broadcastManager.toggle() },
       { id: 'kill-all', label: 'Terminal: Kill All Sessions', accel: 'Ctrl+Shift+K', run: () => this.killAllSessions() },
       { id: 'save-ws', label: 'Workspace: Save Current Layout', accel: '', run: () => this.saveCurrentWorkspace() },
-      { id: 'load-ws', label: 'Workspace: Open Select…', accel: '', run: () => this.workspaceSelect && this.workspaceSelect.focus() },
-      { id: 'grid-2x3', label: 'View: 2×3 Grid Layout', accel: '', run: () => this.setGridPreset('2x3') },
-      { id: 'grid-3x2', label: 'View: 3×2 Grid Layout', accel: '', run: () => this.setGridPreset('3x2') },
+      { id: 'load-ws', label: 'Workspace: Open Select\u2026', accel: '', run: () => this.workspaceSelect && this.workspaceSelect.focus() },
+      { id: 'grid-2x3', label: 'View: 2\u00D73 Grid Layout', accel: '', run: () => this.setGridPreset('2x3') },
+      { id: 'grid-3x2', label: 'View: 3\u00D72 Grid Layout', accel: '', run: () => this.setGridPreset('3x2') },
       { id: 'toggle-sidebar', label: 'View: Toggle Side Bar', accel: 'Ctrl+B', run: () => this.toggleSidebar() },
       { id: 'search', label: 'Terminal: Search Scrollback', accel: 'Ctrl+F', run: () => this.searchFocusedTerminal() },
       { id: 'help', label: 'Help: Keyboard Shortcuts', accel: '', run: () => this.modalHelp.classList.remove('hidden') },
@@ -926,10 +1006,10 @@ class AppController {
   setupMenubar() {
     const menus = {
       file: [
-        { label: 'Open Folder…', accel: 'Ctrl+O', run: () => this.fileExplorer && this.fileExplorer.handleOpenFolderClick() },
+        { label: 'Open Folder\u2026', accel: 'Ctrl+O', run: () => this.fileExplorer && this.fileExplorer.handleOpenFolderClick() },
         { sep: true },
         { label: 'New Pane', accel: 'Ctrl+Shift+N', run: () => this.createPane({}) },
-        { label: 'Save Workspace…', run: () => this.saveCurrentWorkspace() },
+        { label: 'Save Workspace\u2026', run: () => this.saveCurrentWorkspace() },
         { label: 'Delete Workspace', run: () => this.deleteSelectedWorkspace() },
         { sep: true },
         { label: 'Kill All Sessions', accel: 'Ctrl+Shift+K', run: () => this.killAllSessions() }
@@ -942,11 +1022,12 @@ class AppController {
         { label: 'Search Scrollback', accel: 'Ctrl+F', run: () => this.searchFocusedTerminal() }
       ],
       view: [
-        { label: 'Command Palette…', accel: 'Ctrl+Shift+P', run: () => this.openCommandPalette() },
+        { label: 'Command Palette\u2026', accel: 'Ctrl+Shift+P', run: () => this.openCommandPalette() },
         { label: 'Toggle Side Bar', accel: 'Ctrl+B', run: () => this.toggleSidebar() },
+        { label: 'Toggle Full Screen', accel: 'F11', run: () => window.electronAPI.controlWindow('toggle-fullscreen') },
         { sep: true },
-        { label: '2×3 Grid', run: () => this.setGridPreset('2x3') },
-        { label: '3×2 Grid', run: () => this.setGridPreset('3x2') }
+        { label: '2\u00D73 Grid', run: () => this.setGridPreset('2x3') },
+        { label: '3\u00D72 Grid', run: () => this.setGridPreset('3x2') }
       ],
       help: [
         { label: 'Keyboard Shortcuts', run: () => this.modalHelp.classList.remove('hidden') }
@@ -1011,6 +1092,13 @@ class AppController {
   }
 
   attachEventListeners() {
+    const windowControl = (id, action) => document.getElementById(id)?.addEventListener('click', () => window.electronAPI.controlWindow(action));
+    windowControl('btn-window-minimize', 'minimize');
+    windowControl('btn-window-fullscreen', 'toggle-fullscreen');
+    windowControl('btn-window-close', 'close');
+    document.getElementById('titlebar')?.addEventListener('dblclick', (event) => {
+      if (!event.target.closest('button')) window.electronAPI.controlWindow('toggle-maximize');
+    });
     this.btnAddPane.addEventListener('click', () => this.createPane({}));
     this.btnKillAll.addEventListener('click', () => this.killAllSessions());
     this.btnTabAdd.addEventListener('click', () => this.createPane({}));
@@ -1098,7 +1186,7 @@ class AppController {
       const tag = (e.target && e.target.tagName) || '';
       const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable);
 
-      // Ctrl+Shift+P — Command Palette (always)
+      // Ctrl+Shift+P \u2014 Command Palette (always)
       if (e.ctrlKey && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault();
         this.openCommandPalette();
@@ -1121,7 +1209,7 @@ class AppController {
         // Still allow global shortcuts with Ctrl+Shift
       }
 
-      // Ctrl+1..6 — focus pane (requires Ctrl, so typing "1" in shell is safe)
+      // Ctrl+1..6 \u2014 focus pane (requires Ctrl, so typing "1" in shell is safe)
       if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '6') {
         const index = parseInt(e.key, 10) - 1;
         const paneKeys = Array.from(this.panes.keys());
@@ -1152,16 +1240,16 @@ class AppController {
         this.killAllSessions();
         return;
       }
-      // Ctrl+O — Open Folder
+      // Ctrl+O \u2014 Open Folder
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault();
         if (this.fileExplorer) this.fileExplorer.handleOpenFolderClick();
         return;
       }
 
-      // Ctrl+B — toggle sidebar (not when shift held)
+      // Ctrl+B \u2014 toggle sidebar (not when shift held)
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
-        // Skip if focus is inside an xterm terminal — Ctrl+B is the tmux prefix key.
+        // Skip if focus is inside an xterm terminal \u2014 Ctrl+B is the tmux prefix key.
         // Only intercept when focus is on a non-terminal element (matching VS Code behavior).
         const inTerminal = e.target && (e.target.closest('.xterm') || e.target.classList.contains('xterm-helper-textarea'));
         if (inTerminal) return; // let tmux handle it
@@ -1235,7 +1323,7 @@ class AppController {
     }
     if (this.titlebarTitle) {
       const ws = this.activeWorkspaceName || 'Untitled';
-      this.titlebarTitle.textContent = `${ws} — Agent Terminal IDE`;
+      this.titlebarTitle.textContent = `${ws} \u2014 Agent Terminal IDE`;
     }
 
     // Keep broadcast status in sync

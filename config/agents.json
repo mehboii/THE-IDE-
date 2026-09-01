@@ -25,7 +25,7 @@
       "id": "shell",
       "name": "Default Shell",
       "command": "",
-      "description": "Standard system interactive terminal shell (bash/zsh)",
+      "description": "Standard system interactive terminal shell (PowerShell on Windows)",
       "env": {}
     }
   ]

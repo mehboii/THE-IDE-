@@ -42,8 +42,8 @@ class TerminalPane {
         <div class="pane-header-left">
           <span class="status-dot status-idle" title="Session Status: Idle" data-testid="status-dot"></span>
           <input type="text" class="pane-label-input" value="${this.escapeHtml(this.label)}" title="Click to rename pane" aria-label="Pane label" />
-          <div class="cwd-badge" title="Working directory">
-            <span class="cwd-text">${this.escapeHtml(this.cwd || '~')}</span>
+          <div class="cwd-badge" title="${this.escapeHtml(this.cwd || 'No working directory selected')}">
+            <span class="cwd-text" title="${this.escapeHtml(this.cwd || 'No working directory selected')}">${this.escapeHtml(this.cwd || '~')}</span>
             <button class="btn-folder-pick" type="button" title="Change working directory" aria-label="Pick folder">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
             </button>
@@ -164,16 +164,16 @@ class TerminalPane {
       cursorBlink: true,
       cursorStyle: 'block',
       fontSize: 13,
-      fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, "Courier New", Menlo, Monaco, monospace',
+      fontFamily: '"IBM Plex Mono", "Cascadia Mono", Consolas, monospace',
       lineHeight: 1.2,
       scrollback: 5000,
       theme: {
-        background: '#1e1e1e',
-        foreground: '#cccccc',
-        cursor: '#aeafad',
-        cursorAccent: '#1e1e1e',
-        selectionBackground: '#264f78',
-        selectionForeground: '#ffffff',
+        background: '#0D0D15',
+        foreground: '#FFF7F0',
+        cursor: '#FF6B32',
+        cursorAccent: '#0D0D15',
+        selectionBackground: '#3A1711',
+        selectionForeground: '#FFF7F0',
         black: '#000000',
         red: '#cd3131',
         green: '#0dbc79',
@@ -289,6 +289,10 @@ class TerminalPane {
   setCwd(cwd) {
     this.cwd = cwd || '';
     this.cwdText.textContent = this.cwd || '~';
+    const title = this.cwd || 'No working directory selected';
+    this.cwdText.title = title;
+    const badge = this.cwdText.closest('.cwd-badge');
+    if (badge) badge.title = title;
   }
 
   getDimensions() {
