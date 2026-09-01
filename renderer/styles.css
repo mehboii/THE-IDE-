@@ -465,6 +465,24 @@ kbd {
   font-size: 11px;
   color: #8c8c8c;
 }
+.custom-model-item { cursor: pointer; }
+.custom-model-terminal-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: var(--vscode-sideBar-foreground);
+  background: transparent;
+  opacity: .75;
+}
+.custom-model-terminal-btn:hover,
+.custom-model-terminal-btn:focus-visible { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); opacity: 1; outline: 1px solid var(--vscode-focusBorder); }
+.custom-model-terminal-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .custom-model-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .custom-model-form label { display: grid; gap: 4px; color: var(--text-muted); font-size: 12px; }
 .custom-model-form .text-input, .custom-model-form .select-input { max-width: none; width: 100%; }
@@ -643,6 +661,28 @@ kbd {
 
 /* Remote model pane: it intentionally shares the grid chrome with terminals. */
 .custom-model-badge { color: #9cdcfe; font-size: 11px; padding: 1px 5px; border: 1px solid #397a9e; border-radius: 8px; }
+/* A 2x3 pane cannot fit both chat metadata and every action on one 28px row.
+   Keep the provider badge with the model metadata and actions on a second row. */
+.custom-model-pane .pane-header {
+  height: auto;
+  min-height: var(--pane-header-height);
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding-block: 3px;
+}
+.custom-model-pane .pane-header-left,
+.custom-model-pane .pane-header-right {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+.custom-model-pane .pane-header-right {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.custom-model-pane .tool-approve-toggle,
+.custom-model-pane .pane-action-btn,
+.custom-model-pane .custom-model-badge { flex: 0 0 auto; }
 .custom-cwd, .tool-approve-toggle { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; color: var(--text-muted); font-size: 11px; }
 .tool-approve-toggle { display: flex; gap: 3px; align-items: center; }
 .chat-body { min-height: 0; flex: 1; display: flex; flex-direction: column; background: #1e1e1e; }
