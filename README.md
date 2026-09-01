@@ -151,18 +151,18 @@ npm run dist
 ```
 
 The output will be generated in the `./dist/` directory:
-- `dist/agent-terminal-ide-1.0.3-x64.AppImage`
+- `dist/agent-terminal-ide-4.0.0-x64.AppImage`
 
-On GitHub, run the **Build Linux AppImage** workflow manually or push a version tag. A tag such as `v1.0.3` also creates a GitHub Release with the AppImage attached, so users can download the latest release with the GitHub CLI:
+On GitHub, run the **Build Linux AppImage** workflow manually or push a version tag. A tag such as `v4.0.0` also creates a GitHub Release with the AppImage attached, so users can download the latest release with the GitHub CLI:
 
 ```bash
 gh release download --repo mehboii/THE-IDE- --pattern '*.AppImage'
 ```
 
-To download a particular version, replace `v1.0.3` below with its release tag:
+To download a particular version, replace `v4.0.0` below with its release tag:
 
 ```bash
-gh release download v1.0.3 --repo mehboii/THE-IDE- --pattern '*.AppImage'
+gh release download v4.0.0 --repo mehboii/THE-IDE- --pattern '*.AppImage'
 ```
 
 Manual workflow runs provide the `linux-appimage-x64` Actions artifact instead. On the target machine:
