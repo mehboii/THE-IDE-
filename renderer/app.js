@@ -230,6 +230,20 @@ class AppController {
       // directory; never use a persisted pane or workspace cwd as a fallback.
       const initialCwd = await window.electronAPI.getProjectRoot();
 
+      // A custom-model terminal stores only the model ID. Its OLLAMA_HOST is
+      // resolved from the saved configuration immediately before every spawn,
+      // so a pane cannot retain an endpoint captured when it was first opened.
+      const { OLLAMA_HOST: ignoredCachedOllamaHost, ...paneEnvVars } = envVars;
+      let customModelEnvVars = {};
+      if (customModelId) {
+        try {
+          customModelEnvVars = await this.ollamaEnvVarsForCustomModel(customModelId);
+        } catch (error) {
+          this.showBanner(`Unable to start custom-model terminal: ${error.message}`, 'error');
+          return null;
+        }
+      }
+
       const pane = new TerminalPane({
         id: paneId,
         label: label || `Pane ${this.panes.size + 1}`,
@@ -237,7 +251,7 @@ class AppController {
         agentId: agentId || (agentObj && agentObj.id) || 'shell',
         agentCommand,
         customModelId,
-        envVars,
+        envVars: paneEnvVars,
         onFocus: (pId) => this.focusPane(pId),
         onClose: (pId) => this.removePane(pId),
         onRestart: (pId) => this.restartPane(pId, { killTmux: true }),
@@ -266,7 +280,7 @@ class AppController {
           paneId,
           cwd: initialCwd,
           agentCommand: agentCommand !== undefined ? agentCommand : (agentObj ? agentObj.command : ''),
-          envVars: { ...(agentObj ? (agentObj.env || {}) : {}), ...envVars },
+          envVars: { ...(agentObj ? (agentObj.env || {}) : {}), ...paneEnvVars, ...customModelEnvVars },
           customSessionName,
           // IPC structured cloning may omit undefined object properties.
           // Send an explicit value so ordinary panes cannot reattach to a
@@ -367,11 +381,17 @@ class AppController {
       // A missing project root is valid for ordinary terminal shells: the
       // main process chooses the safe home-directory fallback in that case.
       if (liveRoot) pane.setCwd(liveRoot);
+      // Do not reuse an OLLAMA_HOST captured on the pane. A custom model can
+      // be edited while its terminal is open, so resolve it from persisted
+      // settings at the exact moment this replacement session is spawned.
+      const customModelEnvVars = pane.customModelId
+        ? await this.ollamaEnvVarsForCustomModel(pane.customModelId)
+        : {};
       const result = await window.electronAPI.restartPty({
         paneId,
         cwd: liveRoot,
         agentCommand: pane.agentCommand !== undefined ? pane.agentCommand : (agentObj ? agentObj.command : ''),
-        envVars: { ...(agentObj ? (agentObj.env || {}) : {}), ...(pane.envVars || {}) },
+        envVars: { ...(agentObj ? (agentObj.env || {}) : {}), ...(pane.envVars || {}), ...customModelEnvVars },
         trigger,
         cols: dims.cols,
         rows: dims.rows
@@ -754,6 +774,19 @@ class AppController {
     return `${host}:${port}`;
   }
 
+  async ollamaEnvVarsForCustomModel(modelId) {
+    // The store, rather than a TerminalPane's initial envVars, is the source
+    // of truth. Re-read it for both the initial spawn and every restart.
+    const models = await window.electronAPI.getCustomModels();
+    this.customModels = Array.isArray(models) ? models : [];
+    const model = this.customModels.find((candidate) => candidate.id === modelId);
+    if (!model) throw new Error('This custom model no longer exists.');
+
+    const ollamaHost = this.ollamaHostForModel(model);
+    if (!ollamaHost) throw new Error(`Cannot use "${model.name}": its host is missing.`);
+    return { OLLAMA_HOST: ollamaHost };
+  }
+
   async openCustomModelTerminal(model) {
     const existing = [...this.panes.values()].find((pane) => pane.customModelId === model.id);
     if (existing) {
@@ -765,16 +798,11 @@ class AppController {
     const pending = this.customModelTerminalCreates.get(model.id);
     if (pending) return pending;
 
-    const ollamaHost = this.ollamaHostForModel(model);
-    if (!ollamaHost) {
-      this.showBanner(`Cannot open a terminal for "${model.name}": its host is missing.`, 'error');
-      return null;
-    }
     const create = this.createPane({
       label: model.name,
       agentId: 'shell',
       customModelId: model.id,
-      envVars: { OLLAMA_HOST: ollamaHost },
+
       trigger: 'custom-model-terminal'
     });
     this.customModelTerminalCreates.set(model.id, create);
