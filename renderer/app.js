@@ -244,6 +244,8 @@ class AppController {
         }
       }
 
+      console.info('[PTY_TRACE] renderer.create-pane.spawn-request', { paneId, trigger, customModelId: customModelId || null, envVars: { ...(agentObj ? (agentObj.env || {}) : {}), ...paneEnvVars, ...customModelEnvVars } });
+
       const pane = new TerminalPane({
         id: paneId,
         label: label || `Pane ${this.panes.size + 1}`,
@@ -790,14 +792,16 @@ class AppController {
   async openCustomModelTerminal(model) {
     const existing = [...this.panes.values()].find((pane) => pane.customModelId === model.id);
     if (existing) {
+      console.info('[PTY_TRACE] renderer.custom-model-terminal.duplicate-existing', { modelId: model.id, paneId: existing.id, status: existing.status, action: existing.status !== 'running' ? 'restart' : 'focus-only' });
       this.focusPane(existing.id);
       if (existing.status !== 'running') await this.restartPane(existing.id, { killTmux: true, trigger: 'custom-model-terminal-reconnect' });
       return existing;
     }
 
     const pending = this.customModelTerminalCreates.get(model.id);
-    if (pending) return pending;
+    if (pending) { console.info('[PTY_TRACE] renderer.custom-model-terminal.duplicate-pending', { modelId: model.id, action: 'reuse-promise-no-kill' }); return pending; }
 
+    console.info('[PTY_TRACE] renderer.custom-model-terminal.new', { modelId: model.id, action: 'create-pane' });
     const create = this.createPane({
       label: model.name,
       agentId: 'shell',
