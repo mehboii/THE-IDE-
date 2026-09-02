@@ -1,8 +1,24 @@
 const { randomUUID } = require('crypto');
 const { TOOL_SCHEMA, executeTool, title } = require('./custom-model-tools');
 const projectRoot = require('./project-root');
+const customModelStore = require('./custom-model-store');
 
 const CONNECT_TIMEOUT_MS = 10_000;
+const customModelTraceEnabled = process.env.IDE_CUSTOM_MODEL_TRACE === '1';
+function customModelTrace(event, details = {}) {
+  if (customModelTraceEnabled) console.log('[CUSTOM_MODEL_TRACE] ' + event + ' ' + JSON.stringify(details));
+}
+function modelConnection(model) {
+  if (!model) return null;
+  return { id: model.id || null, type: model.type || null, host: model.host || null, baseUrl: model.baseUrl || null, port: model.port || null, model: model.model || null, toolCapable: model.toolCapable };
+}
+
+function resolveLiveModel(capturedModel) {
+  if (!capturedModel?.id) return capturedModel;
+  const savedModel = customModelStore.list().find((candidate) => candidate.id === capturedModel.id);
+  if (!savedModel) throw new Error('This custom model no longer exists.');
+  return savedModel;
+}
 
 function baseUrl(model) {
   // `host` is the original field name. `baseUrl` is also accepted so callers
@@ -101,9 +117,15 @@ async function readOllamaResponse(response, emit) {
 
 async function streamOllamaAgent(webContents, paneId, requestId, model, messages, cwd, fullAutoApprove, maxIterations) {
   const history = messages.map(({ role, content }) => ({ role, content }));
-  const agentic = isToolCapable(model);
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-    const response = await request(endpointUrl(model, '/api/chat'), { method: 'POST', headers: headers(model), body: JSON.stringify({ model: model.model, messages: history, stream: true, ...(agentic ? { tools: TOOL_SCHEMA } : {}) }) });
+    // Existing panes retain their creation-time model only as an ID lookup key.
+    // Resolve every outbound request from persisted settings so edits apply immediately.
+    const liveModel = resolveLiveModel(model);
+    const agentic = isToolCapable(liveModel);
+    const url = endpointUrl(liveModel, '/api/chat');
+    const requestBody = { model: liveModel.model, messages: history, stream: true, ...(agentic ? { tools: TOOL_SCHEMA } : {}) };
+    customModelTrace('ollama.chat.request', { paneId, requestId, iteration, method: 'POST', url, body: requestBody, capturedModel: modelConnection(model), dispatchedModel: modelConnection(liveModel) });
+    const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(requestBody) });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
     const answer = await readOllamaResponse(response, (token) => webContents.send('custom-model:token', { paneId, requestId, token }));
     history.push({ role: 'assistant', content: answer.content, ...(answer.toolCalls.length ? { tool_calls: answer.toolCalls } : {}) });
@@ -126,12 +148,10 @@ async function streamOllamaAgent(webContents, paneId, requestId, model, messages
 
 async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApprove = false, maxIterations = 25) {
   const requestId = randomUUID();
-  const url = endpointUrl(model, model.type === 'ollama' ? '/api/chat' : '/v1/chat/completions');
-  const body = model.type === 'ollama'
-    ? { model: model.model, messages, stream: true }
-    : { model: model.model, messages, stream: true };
+  const initialLiveModel = resolveLiveModel(model);
+  customModelTrace('streamChat.enter', { paneId, requestId, capturedModel: modelConnection(model), initialLiveModel: modelConnection(initialLiveModel), messageCount: Array.isArray(messages) ? messages.length : 0 });
   try {
-    const agentic = model.type === 'ollama' && isToolCapable(model);
+    const agentic = initialLiveModel.type === 'ollama' && isToolCapable(initialLiveModel);
     // Only tool-enabled Ollama requests need a project root. Plain chat must
     // remain usable before a folder is opened, just like OpenAI-compatible chat.
     if (agentic) {
@@ -139,8 +159,13 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
       projectRoot.assertSpawnCwd(projectCwd, 'custom-model:tool-loop');
       return await streamOllamaAgent(webContents, paneId, requestId, model, messages, projectCwd, fullAutoApprove, Math.min(Math.max(Number(maxIterations) || 25, 1), 100));
     }
-    if (model.type === 'ollama') return await streamOllamaAgent(webContents, paneId, requestId, model, messages, cwd, fullAutoApprove, 1);
-    const response = await request(url, { method: 'POST', headers: headers(model), body: JSON.stringify(body) });
+    if (initialLiveModel.type === 'ollama') return await streamOllamaAgent(webContents, paneId, requestId, model, messages, cwd, fullAutoApprove, 1);
+    // Resolve again immediately before the non-Ollama request for the same live-settings guarantee.
+    const liveModel = resolveLiveModel(model);
+    const url = endpointUrl(liveModel, '/v1/chat/completions');
+    const body = { model: liveModel.model, messages, stream: true };
+    customModelTrace('openai.chat.request', { paneId, requestId, method: 'POST', url, body, capturedModel: modelConnection(model), dispatchedModel: modelConnection(liveModel) });
+    const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(body) });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' \u2014 check API key' : ''}`);
     if (!response.body) throw new Error('The endpoint returned no response stream.');
     const reader = response.body.getReader();
