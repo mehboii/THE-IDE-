@@ -3,6 +3,10 @@ const { execFile } = require('child_process');
 const projectRoot = require('./project-root');
 
 const TMUX_PREFIX = 'ide-';
+const ptyTraceEnabled = process.env.IDE_PTY_TRACE === '1';
+function ptyTrace(event, details = {}) {
+  if (ptyTraceEnabled) console.log('[PTY_TRACE] ' + event + ' ' + JSON.stringify(details));
+}
 
 function runTmux(args) {
   return new Promise((resolve) => {
@@ -33,6 +37,7 @@ class PtyManager {
 
   async createSession({ paneId, cwd, agentCommand = '', envVars = {}, customSessionName, cols = 80, rows = 24, forceNew = true, trigger = 'unknown-pane-action' }) {
     if (!paneId) throw new Error('paneId is required');
+    ptyTrace('createSession.enter', { paneId, trigger, customSessionName: customSessionName || null, forceNew, agentCommand, envVars, requestedCwd: cwd || null });
     await this.destroySession(paneId, false);
 
     // Once a folder is open, it is the sole cwd authority for every spawn.
@@ -41,6 +46,7 @@ class PtyManager {
     const safeCwd = projectRoot.resolveTerminalWorkingDirectory(`PTY session ${paneId}`);
     projectRoot.assertSpawnCwd(safeCwd, `pty:${trigger} pane=${paneId}`);
     const tmux = await this.checkTmuxAvailable();
+    ptyTrace('createSession.branch', { paneId, trigger, branch: tmux.available ? 'tmux' : 'direct-node-pty', tmux });
 
     // Fallback mode when tmux is not installed / not on PATH
     if (!tmux.available) {
@@ -62,6 +68,7 @@ class PtyManager {
 
       let ptyProcess;
       try {
+        ptyTrace('node-pty.spawn', { paneId, trigger, branch: 'direct-node-pty', command: shell, args, cwd: safeCwd, envInjection: { OLLAMA_HOST: envVars.OLLAMA_HOST ?? null, passedInSpawnEnv: Object.prototype.hasOwnProperty.call(envVars, 'OLLAMA_HOST') } });
         ptyProcess = spawn(shell, args, {
           name: isWindows ? 'xterm' : 'xterm-256color',
           cols: Math.max(2, cols),
@@ -76,6 +83,7 @@ class PtyManager {
       this.sessions.set(paneId, { ptyProcess, sessionName: null, isFallback: true });
       ptyProcess.onData((data) => this.send('pty-data', { paneId, data }));
       ptyProcess.onExit(({ exitCode }) => {
+        ptyTrace('node-pty.exit', { paneId, trigger, branch: 'direct-node-pty', exitCode });
         if (this.sessions.get(paneId)?.ptyProcess === ptyProcess) this.sessions.delete(paneId);
         this.send('pty-exit', { paneId, exitCode, status: 'detached' });
       });
@@ -103,6 +111,7 @@ class PtyManager {
 
     let ptyProcess;
     try {
+      ptyTrace('node-pty.spawn', { paneId, trigger, branch: 'tmux', command: 'tmux', args, cwd: safeCwd, envInjection: { OLLAMA_HOST: envVars.OLLAMA_HOST ?? null, passedInSpawnEnv: Object.prototype.hasOwnProperty.call(envVars, 'OLLAMA_HOST') } });
       ptyProcess = spawn('tmux', args, {
         name: 'xterm-256color',
         cols: Math.max(2, cols),
@@ -117,6 +126,7 @@ class PtyManager {
     this.sessions.set(paneId, { ptyProcess, sessionName, isFallback: false });
     ptyProcess.onData((data) => this.send('pty-data', { paneId, data }));
     ptyProcess.onExit(({ exitCode }) => {
+      ptyTrace('node-pty.exit', { paneId, trigger, branch: 'tmux', exitCode });
       if (this.sessions.get(paneId)?.ptyProcess === ptyProcess) this.sessions.delete(paneId);
       this.send('pty-exit', { paneId, exitCode, status: 'detached' });
     });
@@ -128,14 +138,18 @@ class PtyManager {
     if (this.window && !this.window.isDestroyed()) this.window.webContents.send(channel, payload);
   }
 
-  write(paneId, data) { this.sessions.get(paneId)?.ptyProcess.write(data); }
+  write(paneId, data) {
+    if (String(data).includes('\x03')) ptyTrace('pty.write.ctrl-c', { paneId, data: String(data) });
+    this.sessions.get(paneId)?.ptyProcess.write(data);
+  }
   resize(paneId, cols, rows) {
     const p = this.sessions.get(paneId)?.ptyProcess;
     if (p && cols > 1 && rows > 1) p.resize(cols, rows);
   }
   destroySession(paneId, killTmux = false) {
     const entry = this.sessions.get(paneId);
-    if (entry) { try { entry.ptyProcess.kill(); } catch (_) {} this.sessions.delete(paneId); }
+    ptyTrace('pty.destroy.request', { paneId, killTmux, foundSession: !!entry, sessionName: entry?.sessionName || null, isFallback: entry?.isFallback ?? null, ptyKillSignal: 'default (no explicit signal)' });
+    if (entry) { try { ptyTrace('pty.kill.invoke', { paneId, method: 'node-pty.kill', signal: 'default (no explicit signal)' }); entry.ptyProcess.kill(); } catch (error) { ptyTrace('pty.kill.error', { paneId, error: error.message }); } this.sessions.delete(paneId); }
     return killTmux && entry && entry.sessionName ? this.killTmuxSession(entry.sessionName) : Promise.resolve({ ok: true });
   }
   async listOrphanSessions() {
@@ -149,6 +163,7 @@ class PtyManager {
   async killTmuxSession(sessionName) {
     if (!sessionName) return { ok: true };
     if (!/^ide-[A-Za-z0-9_-]+$/.test(sessionName)) throw new Error('Invalid tmux session name');
+    ptyTrace('tmux.kill-session.request', { sessionName });
     for (const [paneId, entry] of this.sessions) if (entry.sessionName === sessionName) this.destroySession(paneId, false);
     return runTmux(['kill-session', '-t', sessionName]);
   }

@@ -22,6 +22,7 @@ function registerIpcHandlers({ openEditorFile } = {}) {
 
   // PTY session handlers
   ipcMain.handle('pty:create', async (event, params) => {
+    if (process.env.IDE_PTY_TRACE === '1') console.log('[PTY_TRACE] ipc.pty:create ' + JSON.stringify({ paneId: params?.paneId, trigger: params?.trigger, envVars: params?.envVars, senderId: event.sender.id }));
     try {
       return await ptyManager.createSession(params);
     } catch (error) {
@@ -31,6 +32,7 @@ function registerIpcHandlers({ openEditorFile } = {}) {
   });
 
   ipcMain.on('pty:write', (event, { paneId, data }) => {
+    if (process.env.IDE_PTY_TRACE === '1' && String(data).includes('\x03')) console.log('[PTY_TRACE] ipc.pty:write.ctrl-c ' + JSON.stringify({ paneId, data, senderId: event.sender.id }));
     ptyManager.write(paneId, data);
   });
 
@@ -39,11 +41,13 @@ function registerIpcHandlers({ openEditorFile } = {}) {
   });
 
   ipcMain.handle('pty:destroy', async (event, { paneId, killTmux }) => {
+    if (process.env.IDE_PTY_TRACE === '1') console.log('[PTY_TRACE] ipc.pty:destroy ' + JSON.stringify({ paneId, killTmux, senderId: event.sender.id }));
     await ptyManager.destroySession(paneId, killTmux);
     return { success: true };
   });
 
   ipcMain.handle('pty:restart', async (event, params) => {
+    if (process.env.IDE_PTY_TRACE === '1') console.log('[PTY_TRACE] ipc.pty:restart ' + JSON.stringify({ paneId: params?.paneId, trigger: params?.trigger, envVars: params?.envVars, senderId: event.sender.id }));
     // Kill old tmux session by default so Restart always spawns a fresh PTY,
     // not a reattach to a dead session. Pass forceNew:false to reattach only.
     const forceNew = params.forceNew !== false;
