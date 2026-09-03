@@ -4,6 +4,7 @@ const projectRoot = require('./project-root');
 const customModelStore = require('./custom-model-store');
 
 const CONNECT_TIMEOUT_MS = 10_000;
+const CHAT_TIMEOUT_MS = 120_000;
 const customModelTraceEnabled = process.env.IDE_CUSTOM_MODEL_TRACE === '1';
 function customModelTrace(event, details = {}) {
   if (customModelTraceEnabled) console.log('[CUSTOM_MODEL_TRACE] ' + event + ' ' + JSON.stringify(details));
@@ -16,8 +17,7 @@ function modelConnection(model) {
 function resolveLiveModel(capturedModel) {
   if (!capturedModel?.id) return capturedModel;
   const savedModel = customModelStore.list().find((candidate) => candidate.id === capturedModel.id);
-  if (!savedModel) throw new Error('This custom model no longer exists.');
-  return savedModel;
+  return savedModel || capturedModel;
 }
 
 function baseUrl(model) {
@@ -125,7 +125,7 @@ async function streamOllamaAgent(webContents, paneId, requestId, model, messages
     const url = endpointUrl(liveModel, '/api/chat');
     const requestBody = { model: liveModel.model, messages: history, stream: true, ...(agentic ? { tools: TOOL_SCHEMA } : {}) };
     customModelTrace('ollama.chat.request', { paneId, requestId, iteration, method: 'POST', url, body: requestBody, capturedModel: modelConnection(model), dispatchedModel: modelConnection(liveModel) });
-    const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(requestBody) });
+    const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(requestBody) }, CHAT_TIMEOUT_MS);
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
     const answer = await readOllamaResponse(response, (token) => webContents.send('custom-model:token', { paneId, requestId, token }));
     history.push({ role: 'assistant', content: answer.content, ...(answer.toolCalls.length ? { tool_calls: answer.toolCalls } : {}) });
@@ -165,7 +165,7 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
     const url = endpointUrl(liveModel, '/v1/chat/completions');
     const body = { model: liveModel.model, messages, stream: true };
     customModelTrace('openai.chat.request', { paneId, requestId, method: 'POST', url, body, capturedModel: modelConnection(model), dispatchedModel: modelConnection(liveModel) });
-    const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(body) });
+    const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(body) }, CHAT_TIMEOUT_MS);
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' \u2014 check API key' : ''}`);
     if (!response.body) throw new Error('The endpoint returned no response stream.');
     const reader = response.body.getReader();
