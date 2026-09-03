@@ -40,6 +40,7 @@ function endpointUrl(model, path) {
   return `${base}${path}`;
 }
 
+
 async function request(url, options = {}, timeout = CONNECT_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -55,6 +56,45 @@ async function request(url, options = {}, timeout = CONNECT_TIMEOUT_MS) {
 
 const pendingApprovals = new Map();
 const knownToolFamilies = /^(qwen3|qwen2\.5|llama3\.1|llama3\.2|mistral-nemo|mistral-small|command-r|hermes)/i;
+
+const AGENT_SYSTEM_PROMPT = 'You are an autonomous coding assistant inside an IDE. '
+  + 'You have access to tools: read_file, write_file, list_directory, and run_command. '
+  + 'When asked to create, edit, or write a file, you MUST call the write_file tool with the correct path and content arguments. '
+  + 'When asked to read a file, call read_file. When asked to list files, call list_directory. '
+  + 'When asked to run a command, call run_command. '
+  + 'Do NOT describe what you would do in prose or write code blocks instead of calling the tool. '
+  + 'Always prefer tool calls over text explanations.';
+
+// Small models (e.g. qwen2.5-coder:1.5b) often emit tool calls as JSON text
+// in content rather than using Ollama's structured tool_calls format.
+// This function detects that pattern and promotes it to a real tool call.
+function extractToolCallsFromContent(content) {
+  if (!content || typeof content !== 'string') return [];
+  const trimmed = content.trim();
+  // Must start with { and look like a tool call JSON object
+  if (!trimmed.startsWith('{')) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    const name = parsed.name || parsed.function?.name;
+    const args = parsed.arguments || parsed.function?.arguments || {};
+    if (name && typeof name === 'string' && ['read_file', 'write_file', 'list_directory', 'run_command'].includes(name)) {
+      return [{ function: { name, arguments: typeof args === 'string' ? args : JSON.stringify(args) } }];
+    }
+  } catch {
+    // Content might use backticks or other non-strict-JSON; try a lenient regex extraction
+    const nameMatch = trimmed.match(/"name"\s*:\s*"(read_file|write_file|list_directory|run_command)"/);
+    if (!nameMatch) return [];
+    const argsMatch = trimmed.match(/"arguments"\s*:\s*(\{[\s\S]*\})/);
+    if (!argsMatch) return [{ function: { name: nameMatch[1], arguments: '{}' } }];
+    // Try to parse just the arguments block, cleaning common issues
+    try {
+      const cleaned = argsMatch[1].replace(/`/g, '"');
+      JSON.parse(cleaned);
+      return [{ function: { name: nameMatch[1], arguments: cleaned } }];
+    } catch { return [{ function: { name: nameMatch[1], arguments: '{}' } }]; }
+  }
+  return [];
+}
 
 function headers(model) {
   const value = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -112,11 +152,24 @@ async function readOllamaResponse(response, emit) {
     }
     if (done) break;
   }
+  // Fallback: small models may emit tool calls as JSON text in content.
+  if (!toolCalls.length && content.trim()) {
+    const extracted = extractToolCallsFromContent(content);
+    if (extracted.length) {
+      customModelTrace('ollama.content-tool-fallback', { extractedCount: extracted.length, rawContent: content.slice(0, 200) });
+      toolCalls = extracted;
+    }
+  }
   return { content, toolCalls };
 }
 
 async function streamOllamaAgent(webContents, paneId, requestId, model, messages, cwd, fullAutoApprove, maxIterations) {
   const history = messages.map(({ role, content }) => ({ role, content }));
+  // Inject a system prompt on the first turn if the caller didn't provide one,
+  // so small models are guided toward using tool calls instead of narrating.
+  if (maxIterations > 1 && !history.some((m) => m.role === 'system')) {
+    history.unshift({ role: 'system', content: AGENT_SYSTEM_PROMPT });
+  }
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
     // Existing panes retain their creation-time model only as an ID lookup key.
     // Resolve every outbound request from persisted settings so edits apply immediately.

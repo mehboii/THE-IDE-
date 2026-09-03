@@ -2,6 +2,7 @@ class CustomModelPane {
   constructor({ id, label, model, cwd, onFocus, onClose, onRestart, onKill, onCwdChange, onLabelChange, onStatusChange }) {
     Object.assign(this, { id, label: label || model.name, model, cwd: cwd || '', onFocus, onClose, onRestart, onKill, onCwdChange, onLabelChange, onStatusChange });
     this.status = 'idle'; this.messages = []; this._activeMessage = null; this.fullAutoApprove = false; this.toolCards = new Map();
+    this._loadingEl = null; this._loadingTimers = [];
     this._createDOM();
   }
   async init() { this.setStatus('running'); }
@@ -21,16 +22,47 @@ class CustomModelPane {
     this.container.querySelector('.btn-kill-pane').addEventListener('click', () => this.onKill?.(this.id));
     this.container.querySelector('.btn-close-pane').addEventListener('click', () => this.onClose?.(this.id));
   }
+  _showLoading() {
+    this._clearLoading();
+    const el = document.createElement('div');
+    el.className = 'chat-loading';
+    el.innerHTML = '<span class="chat-loading-spinner"></span><span class="chat-loading-text">Waiting for response\u2026</span>';
+    this.messagesEl.appendChild(el);
+    this._loadingEl = el;
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    const textEl = el.querySelector('.chat-loading-text');
+    const t1 = setTimeout(() => { if (textEl && this._loadingEl) textEl.textContent = 'Loading model into memory\u2026'; }, 3000);
+    const t2 = setTimeout(() => { if (textEl && this._loadingEl) textEl.textContent = 'Still loading model \u2014 cold start on CPU or mobile hardware can take 30\u201360s\u2026'; }, 12000);
+    this._loadingTimers.push(t1, t2);
+  }
+  _clearLoading() {
+    this._loadingTimers.forEach((t) => clearTimeout(t));
+    this._loadingTimers = [];
+    if (this._loadingEl) { this._loadingEl.remove(); this._loadingEl = null; }
+  }
   async reconnect() { const result = await window.electronAPI.testCustomModel(this.model); if (result.success) { this.disconnectedEl.classList.add('hidden'); this.setStatus('running'); this.input.disabled = false; this.input.focus(); } else this.disconnect(result.error); }
   async send(text) {
     text = String(text || '').trim(); if (!text || this.status === 'disconnected') return;
     this.addMessage('user', text); this.input.value = ''; this.input.disabled = true; this._activeMessage = this.addMessage('assistant', ''); this.setStatus('busy');
+    this._showLoading();
     await window.electronAPI.sendCustomModelChat({ paneId: this.id, model: this.model, cwd: this.cwd, fullAutoApprove: this.fullAutoApprove, maxIterations: this.model.maxIterations || 25, messages: this.messages.filter((m) => m.role === 'user' || m.role === 'assistant').map(({ role, content }) => ({ role, content })) });
   }
-  receiveToken(token) { if (this._activeMessage) { this._activeMessage.content += token; this._activeMessage.el.textContent = this._activeMessage.content; this.messagesEl.scrollTop = this.messagesEl.scrollHeight; } }
-  receiveDone() { this._activeMessage = null; this.input.disabled = false; this.setStatus('running'); this.input.focus(); }
-  disconnect(error) { this._activeMessage = null; this.input.disabled = true; this.disconnectedEl.classList.remove('hidden'); this.disconnectedEl.querySelector('.disconnect-detail').textContent = ` \u2014 ${error}`; this.setStatus('disconnected'); }
+  receiveToken(token) {
+    this._clearLoading();
+    if (this._activeMessage) { this._activeMessage.content += token; this._activeMessage.el.textContent = this._activeMessage.content; this.messagesEl.scrollTop = this.messagesEl.scrollHeight; }
+  }
+  receiveDone() { this._clearLoading(); this._activeMessage = null; this.input.disabled = false; this.setStatus('running'); this.input.focus(); }
+  disconnect(error) {
+    this._clearLoading();
+    if (this._activeMessage && !this._activeMessage.content) {
+      this._activeMessage.el.remove();
+      const idx = this.messages.indexOf(this._activeMessage);
+      if (idx >= 0) this.messages.splice(idx, 1);
+    }
+    this._activeMessage = null; this.input.disabled = true; this.disconnectedEl.classList.remove('hidden'); this.disconnectedEl.querySelector('.disconnect-detail').textContent = ` \u2014 ${error}`; this.setStatus('disconnected');
+  }
   showToolCall(call) {
+    this._clearLoading();
     const card = document.createElement('details'); card.className = 'tool-call'; card.open = true; card.innerHTML = `<summary>${this.escapeHtml(call.title || call.name)}</summary><pre>${this.escapeHtml(JSON.stringify(call.args || {}, null, 2))}</pre>`;
     if (call.needsApproval) { const actions = document.createElement('div'); actions.className = 'tool-approval'; actions.innerHTML = '<span>Approval required</span><button class="btn btn-primary" type="button">Approve</button><button class="btn btn-danger" type="button">Deny</button>'; actions.querySelector('.btn-primary').addEventListener('click', () => { window.electronAPI.decideCustomModelTool(call.callId, true); actions.remove(); }); actions.querySelector('.btn-danger').addEventListener('click', () => { window.electronAPI.decideCustomModelTool(call.callId, false); actions.remove(); }); card.appendChild(actions); }
     this.messagesEl.appendChild(card); this.toolCards.set(call.callId, card); this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
@@ -40,7 +72,7 @@ class CustomModelPane {
   addMessage(role, content) { const el = document.createElement('div'); el.className = `chat-message ${role}`; el.textContent = content; this.messagesEl.appendChild(el); const item = { role, content, el }; this.messages.push(item); this.messagesEl.scrollTop = this.messagesEl.scrollHeight; return item; }
   setStatus(status) { this.status = status; this.statusDot.className = `status-dot status-${status}`; this.statusDot.title = `Model status: ${status}`; this.onStatusChange?.(this.id, status); }
   setFocused(focused) { this.container.classList.toggle('focused', focused); if (focused && !this.input.disabled) this.input.focus(); }
-  fit() {} getDimensions() { return { cols: 80, rows: 24 }; } clearTerminal() { this.messagesEl.innerHTML = ''; this.messages = []; this.toolCards.clear(); } write() {} setCwd(cwd) { this.cwd = cwd || ''; this.cwdButton.textContent = this.cwd || 'Project root'; } destroy() { this.container.remove(); }
+  fit() {} getDimensions() { return { cols: 80, rows: 24 }; } clearTerminal() { this._clearLoading(); this.messagesEl.innerHTML = ''; this.messages = []; this.toolCards.clear(); } write() {} setCwd(cwd) { this.cwd = cwd || ''; this.cwdButton.textContent = this.cwd || 'Project root'; } destroy() { this._clearLoading(); this.container.remove(); }
   escapeHtml(value) { return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 }
 window.CustomModelPane = CustomModelPane;
