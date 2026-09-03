@@ -145,13 +145,16 @@ class AppController {
 
     window.electronAPI.onPtyExit(({ paneId, exitCode, status }) => {
       const pane = this.panes.get(paneId);
+      console.info('[PTY_TRACE] renderer.onPtyExit', { paneId, exitCode, status, paneLabel: pane?.label, paneStatus: pane?.status, isCustomModel: !!pane?.customModelId });
       if (pane) {
         const next = status === 'detached' ? 'detached' : 'exited';
         pane.setStatus(next);
-        this.showBanner(
-          `Session for "${pane.label}" ended (code ${exitCode ?? '?'}). tmux may have been killed externally \u2014 use Restart to recover.`,
-          'error'
-        );
+        if (exitCode !== 0 && exitCode !== null && status !== 'exited') {
+          this.showBanner(
+            `Session for "${pane.label}" ended (code ${exitCode ?? '?'}). tmux may have been killed externally \u2014 use Restart to recover.`,
+            'error'
+          );
+        }
         this.renderEditorTabs();
         this.renderSidebarSessions();
       }
@@ -370,6 +373,7 @@ class AppController {
     const agentObj = this.agentsList.find((a) => a.id === pane.agentId);
     const dims = pane.getDimensions();
 
+    console.info('[PTY_TRACE] renderer.restartPane.start', { paneId, trigger, killTmux, status: pane.status, label: pane.label, customModelId: pane.customModelId || null });
     pane.setStatus('idle');
     pane.clearTerminal();
     try {
@@ -400,10 +404,12 @@ class AppController {
       });
       if (result?.cwd) pane.setCwd(result.cwd);
       pane.setStatus('running');
+      console.info('[PTY_TRACE] renderer.restartPane.success', { paneId, status: pane.status });
       // Refit after restart so PTY gets correct size
       requestAnimationFrame(() => pane.fit());
     } catch (error) {
       pane.setStatus('exited');
+      console.info('[PTY_TRACE] renderer.restartPane.error', { paneId, error: error.message });
       this.showBanner(`Unable to restart ${pane.label}: ${error.message}`, 'error');
     }
     this.renderEditorTabs();
@@ -578,7 +584,8 @@ class AppController {
         label: pane.label,
         cwd: pane.cwd,
         agentId: pane.agentId,
-        customModelId: pane instanceof CustomModelPane ? pane.model.id : null
+        customModelId: pane instanceof CustomModelPane ? pane.model.id : (pane.customModelId || null),
+        isCustomModelPane: pane instanceof CustomModelPane
       });
     }
 
@@ -618,13 +625,24 @@ class AppController {
 
     if (workspace.panes && Array.isArray(workspace.panes)) {
       for (const pConf of workspace.panes) {
-        await this.createPane({
-          id: pConf.id,
-          label: pConf.label,
-          cwd: pConf.cwd,
-          agentId: pConf.agentId,
-          customModel: pConf.customModelId ? this.customModels.find((m) => m.id === pConf.customModelId) : null
-        });
+        const customModel = pConf.customModelId ? this.customModels.find((m) => m.id === pConf.customModelId) : null;
+        if (customModel && pConf.isCustomModelPane) {
+          await this.createPane({
+            id: pConf.id,
+            label: pConf.label,
+            cwd: pConf.cwd,
+            agentId: pConf.agentId,
+            customModel
+          });
+        } else {
+          await this.createPane({
+            id: pConf.id,
+            label: pConf.label,
+            cwd: pConf.cwd,
+            agentId: pConf.agentId,
+            customModelId: pConf.customModelId || (customModel ? customModel.id : null)
+          });
+        }
       }
     }
 
@@ -790,8 +808,12 @@ class AppController {
   }
 
   async openCustomModelTerminal(model) {
-    const existing = [...this.panes.values()].find((pane) => pane.customModelId === model.id);
+    const existing = [...this.panes.values()].find((pane) => (
+      pane.customModelId === model.id ||
+      (pane.label === model.name && (!pane.agentId || pane.agentId === 'shell'))
+    ));
     if (existing) {
+      existing.customModelId = model.id;
       console.info('[PTY_TRACE] renderer.custom-model-terminal.duplicate-existing', { modelId: model.id, paneId: existing.id, status: existing.status, action: existing.status !== 'running' ? 'restart' : 'focus-only' });
       this.focusPane(existing.id);
       if (existing.status !== 'running') await this.restartPane(existing.id, { killTmux: true, trigger: 'custom-model-terminal-reconnect' });

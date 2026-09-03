@@ -80,12 +80,16 @@ class PtyManager {
         throw new Error(`Failed to spawn fallback PTY for ${paneId}: ${err.message}`);
       }
 
-      this.sessions.set(paneId, { ptyProcess, sessionName: null, isFallback: true });
+      const entry = { ptyProcess, sessionName: null, isFallback: true, isDestroyed: false };
+      this.sessions.set(paneId, entry);
       ptyProcess.onData((data) => this.send('pty-data', { paneId, data }));
-      ptyProcess.onExit(({ exitCode }) => {
-        ptyTrace('node-pty.exit', { paneId, trigger, branch: 'direct-node-pty', exitCode });
-        if (this.sessions.get(paneId)?.ptyProcess === ptyProcess) this.sessions.delete(paneId);
-        this.send('pty-exit', { paneId, exitCode, status: 'detached' });
+      ptyProcess.onExit(({ exitCode, signal }) => {
+        const isCurrent = this.sessions.get(paneId)?.ptyProcess === ptyProcess;
+        ptyTrace('node-pty.exit', { paneId, pid: ptyProcess.pid, trigger, branch: 'direct-node-pty', exitCode, signal: signal ?? null, isCurrent, activeSessionPid: this.sessions.get(paneId)?.ptyProcess?.pid ?? null, isDestroyed: !!entry.isDestroyed });
+        if (isCurrent) this.sessions.delete(paneId);
+        if (isCurrent && !entry.isDestroyed) {
+          this.send('pty-exit', { paneId, exitCode, status: 'detached' });
+        }
       });
 
       return { paneId, sessionName: null, cwd: safeCwd, isFallback: true };
@@ -123,12 +127,16 @@ class PtyManager {
       throw new Error(`Failed to spawn PTY for ${paneId}: ${err.message}`);
     }
 
-    this.sessions.set(paneId, { ptyProcess, sessionName, isFallback: false });
+    const entry = { ptyProcess, sessionName, isFallback: false, isDestroyed: false };
+    this.sessions.set(paneId, entry);
     ptyProcess.onData((data) => this.send('pty-data', { paneId, data }));
-    ptyProcess.onExit(({ exitCode }) => {
-      ptyTrace('node-pty.exit', { paneId, trigger, branch: 'tmux', exitCode });
-      if (this.sessions.get(paneId)?.ptyProcess === ptyProcess) this.sessions.delete(paneId);
-      this.send('pty-exit', { paneId, exitCode, status: 'detached' });
+    ptyProcess.onExit(({ exitCode, signal }) => {
+      const isCurrent = this.sessions.get(paneId)?.ptyProcess === ptyProcess;
+      ptyTrace('node-pty.exit', { paneId, pid: ptyProcess.pid, trigger, branch: 'tmux', exitCode, signal: signal ?? null, isCurrent, isDestroyed: !!entry.isDestroyed });
+      if (isCurrent) this.sessions.delete(paneId);
+      if (isCurrent && !entry.isDestroyed) {
+        this.send('pty-exit', { paneId, exitCode, status: 'detached' });
+      }
     });
 
     return { paneId, sessionName, cwd: safeCwd, isFallback: false };
@@ -148,8 +156,18 @@ class PtyManager {
   }
   destroySession(paneId, killTmux = false) {
     const entry = this.sessions.get(paneId);
-    ptyTrace('pty.destroy.request', { paneId, killTmux, foundSession: !!entry, sessionName: entry?.sessionName || null, isFallback: entry?.isFallback ?? null, ptyKillSignal: 'default (no explicit signal)' });
-    if (entry) { try { ptyTrace('pty.kill.invoke', { paneId, method: 'node-pty.kill', signal: 'default (no explicit signal)' }); entry.ptyProcess.kill(); } catch (error) { ptyTrace('pty.kill.error', { paneId, error: error.message }); } this.sessions.delete(paneId); }
+    const stack = (new Error().stack || '').split('\n').slice(2, 5).map((s) => s.trim()).join(' -> ');
+    ptyTrace('pty.destroy.request', { paneId, killTmux, foundSession: !!entry, pid: entry?.ptyProcess?.pid ?? null, sessionName: entry?.sessionName || null, isFallback: entry?.isFallback ?? null, ptyKillSignal: 'default (no explicit signal)', caller: stack });
+    if (entry) {
+      entry.isDestroyed = true;
+      try {
+        ptyTrace('pty.kill.invoke', { paneId, pid: entry.ptyProcess?.pid ?? null, method: 'node-pty.kill', signal: 'default (no explicit signal)', caller: stack });
+        entry.ptyProcess.kill();
+      } catch (error) {
+        ptyTrace('pty.kill.error', { paneId, error: error.message });
+      }
+      this.sessions.delete(paneId);
+    }
     return killTmux && entry && entry.sessionName ? this.killTmuxSession(entry.sessionName) : Promise.resolve({ ok: true });
   }
   async listOrphanSessions() {
