@@ -1,6 +1,6 @@
 {
   "name": "agent-terminal-ide",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "description": "Desktop Terminal IDE for managing multiple CLI coding agents (Claude, Codex, Aider) simultaneously in a grid layout",
   "main": "main/index.js",
   "scripts": {
@@ -48,6 +48,7 @@
   "build": {
     "appId": "com.antigravity.agent-terminal-ide",
     "productName": "Agent Terminal IDE",
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
@@ -97,5 +98,9 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Agent Terminal IDE"
     }
+  },
+  "allowScripts": {
+    "node-pty": true,
+    "@electron/rebuild": true
   }
 }
