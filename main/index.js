@@ -249,6 +249,10 @@ function createWindow() {
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
+  if (process.platform !== 'darwin') {
+    mainWindow.setMenuBarVisibility(false);
+    mainWindow.autoHideMenuBar = true;
+  }
 }
 
 app.whenReady().then(() => {
