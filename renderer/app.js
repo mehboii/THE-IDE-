@@ -1004,7 +1004,6 @@ class AppController {
       { id: 'grid-2x3', label: 'View: 2\u00D73 Grid Layout', accel: '', run: () => this.setGridPreset('2x3') },
       { id: 'grid-3x2', label: 'View: 3\u00D72 Grid Layout', accel: '', run: () => this.setGridPreset('3x2') },
       { id: 'toggle-sidebar', label: 'View: Toggle Side Bar', accel: 'Ctrl+B', run: () => this.toggleSidebar() },
-      { id: 'search', label: 'Terminal: Search Scrollback', accel: 'Ctrl+F', run: () => this.searchFocusedTerminal() },
       { id: 'help', label: 'Help: Keyboard Shortcuts', accel: '', run: () => this.modalHelp.classList.remove('hidden') },
       { id: 'focus-1', label: 'Terminal: Focus Pane 1', accel: 'Ctrl+1', run: () => this.focusPaneByIndex(0) },
       { id: 'focus-2', label: 'Terminal: Focus Pane 2', accel: 'Ctrl+2', run: () => this.focusPaneByIndex(1) },
@@ -1115,9 +1114,7 @@ class AppController {
       terminal: [
         { label: 'New Pane', accel: 'Ctrl+Shift+N', run: () => this.createPane({}) },
         { label: 'Close Pane', accel: 'Ctrl+Shift+W', run: () => this.focusedPaneId && this.removePane(this.focusedPaneId) },
-        { label: 'Toggle Broadcast', accel: 'Ctrl+Shift+B', run: () => window.broadcastManager.toggle() },
-        { sep: true },
-        { label: 'Search Scrollback', accel: 'Ctrl+F', run: () => this.searchFocusedTerminal() }
+        { label: 'Toggle Broadcast', accel: 'Ctrl+Shift+B', run: () => window.broadcastManager.toggle() }
       ],
       view: [
         { label: 'Command Palette\u2026', accel: 'Ctrl+Shift+P', run: () => this.openCommandPalette() },
@@ -1355,50 +1352,17 @@ class AppController {
         this.toggleSidebar();
         return;
       }
-      if (e.ctrlKey && !e.shiftKey && (e.key === 'F' || e.key === 'f')) {
-        e.preventDefault();
-        this.searchFocusedTerminal();
-      }
     }, true);
   }
 
   handleActivity(button) {
-    document.querySelectorAll('.activity-item').forEach((item) => item.classList.remove('active'));
-    button.classList.add('active');
     const activity = button.dataset.activity;
-
-    if (activity === 'explorer' || activity === 'agents' || activity === 'terminal') {
+    if (activity === 'explorer') {
+      document.querySelectorAll('.activity-item').forEach((item) => item.classList.remove('active'));
+      button.classList.add('active');
       if (this.sidebarCollapsed) this.toggleSidebar(false);
-      const title = document.getElementById('side-bar-title');
-      if (title) {
-        title.textContent = activity === 'agents' ? 'AGENTS'
-          : activity === 'terminal' ? 'TERMINALS' : 'EXPLORER';
-      }
-      if (activity === 'terminal') {
-        const pane = this.panes.get(this.focusedPaneId) || this.panes.values().next().value;
-        if (pane) this.focusPane(pane.id);
-      }
-    } else if (activity === 'search') {
-      this.searchFocusedTerminal();
     } else if (activity === 'settings') {
       this.modalHelp.classList.remove('hidden');
-    }
-  }
-
-  searchFocusedTerminal() {
-    const pane = this.panes.get(this.focusedPaneId);
-    if (!pane || !pane.searchAddon) {
-      this.showBanner('Select an active terminal pane before searching.');
-      return;
-    }
-    const query = window.__IDE_TEST_MODE__
-      ? (window.__IDE_TEST_SEARCH_QUERY__ || '')
-      : prompt('Search terminal scrollback:');
-    if (query) {
-      pane.searchAddon.findNext(query, {
-        incremental: false,
-        decorations: { activeMatchBackground: '#264f78', matchBackground: '#623d18' }
-      });
     }
   }
 
