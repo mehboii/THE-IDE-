@@ -9,7 +9,7 @@
 
 ---
 
-## Core Features
+## Core Features.
 
 - **Dynamic Terminal Grid Layout**: Manage 4–6 terminal panes simultaneously arranged in **2x3** or **3x2** layout grids with real-time xterm.js reflowing on window and pane resize.
 - **tmux Persistent Backend**: Every terminal session is backed by a detached tmux session (`tmux new-session -A -s ide-<uuid>`). If the app crashes or quits, your CLI agent tasks continue executing in the background and reattach seamlessly upon app restart with scrollback intact.
