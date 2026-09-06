@@ -93,6 +93,10 @@ class ProjectRoot {
     diagnosticLog(`[PROCESS SPAWN] action=${action} cwd=${JSON.stringify(resolvedCwd)} openedFolder=${JSON.stringify(expected)}`);
     return resolvedCwd;
   }
+
+  logToolPath(operation, resolvedPath) {
+    diagnosticLog(`[MODEL TOOL] operation=${operation} path=${JSON.stringify(resolvedPath)} openedFolder=${JSON.stringify(this.currentWorkspaceRoot)}`);
+  }
 }
 
 module.exports = new ProjectRoot();

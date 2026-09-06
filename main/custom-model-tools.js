@@ -57,19 +57,19 @@ async function executeTool(name, args, cwd) {
   const root = rootFor(cwd);
   try {
     await fs.access(root);
-    if (name === 'read_file') { const file = resolvedPath(root, args.path); await realPathInside(root, file); return { ok: true, content: await fs.readFile(file, { encoding: 'utf8' }) }; }
-    if (name === 'list_directory') { const dir = resolvedPath(root, args.path || '.'); await realPathInside(root, dir); const entries = await fs.readdir(dir, { withFileTypes: true }); return { ok: true, entries: entries.map((e) => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' })) }; }
+    if (name === 'read_file') { const file = resolvedPath(root, args.path); projectRoot.logToolPath('read_file', file); await realPathInside(root, file); return { ok: true, content: await fs.readFile(file, { encoding: 'utf8' }) }; }
+    if (name === 'list_directory') { const dir = resolvedPath(root, args.path || '.'); projectRoot.logToolPath('list_directory', dir); await realPathInside(root, dir); const entries = await fs.readdir(dir, { withFileTypes: true }); return { ok: true, entries: entries.map((e) => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' })) }; }
     if (name === 'write_file') {
       const file = resolvedPath(root, args.path);
-      console.log(`[FS WRITE ASSERTION] Resolving write path: ${file} against root: ${root}`);
+      projectRoot.logToolPath('write_file', file);
       try { await realPathInside(root, file); } catch (error) { if (error.code !== 'ENOENT') throw error; await realPathInside(root, path.dirname(file), true); }
       await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, String(args.content ?? ''), 'utf8'); return { ok: true, message: `Wrote ${path.relative(root, file)}` };
     }
     if (name === 'run_command') {
       const blocked = destructiveCommand(args.command); if (blocked) return { ok: false, error: blocked };
-      const commandCwd = resolvedPath(root, args.cwd || '.'); await realPathInside(root, commandCwd);
+      const commandCwd = resolvedPath(root, args.cwd || '.'); projectRoot.logToolPath('run_command', commandCwd); await realPathInside(root, commandCwd);
       projectRoot.assertSpawnCwd(commandCwd, 'custom-model:run_command');
-      try { const result = await execAsync(String(args.command), { cwd: commandCwd, timeout: 30_000, maxBuffer: 1024 * 1024, shell: '/bin/zsh' }); return { ok: true, stdout: result.stdout, stderr: result.stderr, exitCode: 0 }; }
+      try { const result = await execAsync(String(args.command), { cwd: commandCwd, timeout: 30_000, maxBuffer: 1024 * 1024 }); return { ok: true, stdout: result.stdout, stderr: result.stderr, exitCode: 0 }; }
       catch (error) { return { ok: false, stdout: error.stdout || '', stderr: error.stderr || error.message, exitCode: Number.isInteger(error.code) ? error.code : 1 }; }
     }
     return { ok: false, error: `Unknown tool: ${name}` };
