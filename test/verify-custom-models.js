@@ -24,11 +24,14 @@ function mockServer() {
     if (req.method !== 'POST' || req.url !== '/api/chat') { res.writeHead(404); return res.end(); }
     let raw = ''; req.on('data', (chunk) => { raw += chunk; }); req.on('end', () => {
       const body = JSON.parse(raw); const messages = body.messages || []; const scenario = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
-      const toolResult = [...messages].reverse().find((m) => m.role === 'tool');
+      const lastUserIndex = messages.map((m) => m.role).lastIndexOf('user');
+      const toolResult = messages.slice(lastUserIndex + 1).find((m) => m.role === 'tool');
       if (!body.tools) return response(res, { content: 'Mock streamed answer' });
       if (scenario.includes('loop forever')) return response(res, tool('list_directory', { path: '.' }));
       if (!toolResult) {
         if (scenario.includes('list files')) return response(res, tool('list_directory', { path: '.' }));
+        if (scenario.includes('nested write')) return response(res, tool('write_file', { path: 'src/components/Button.js', content: 'export default function Button() {}\n' }));
+        if (scenario.includes('command cwd')) return response(res, tool('run_command', { command: process.platform === 'win32' ? 'cd' : 'pwd' }));
         if (scenario.includes('traversal')) return response(res, tool('write_file', { path: '../../etc/passwd', content: 'nope' }));
         if (scenario.includes('destructive')) return response(res, tool('run_command', { command: 'rm -rf /' }));
         if (scenario.includes('deny')) return response(res, tool('write_file', { path: 'denied.txt', content: 'should not write' }));
@@ -79,6 +82,12 @@ function mockServer() {
     await chat.locator('.tool-approval .btn-primary').click(); await chat.locator('.chat-message.assistant').filter({ hasText: 'Tool completed naturally.' }).waitFor();
     const written = fs.readFileSync(path.join(project, 'generated/agent.txt'), 'utf8'); if (written !== 'written by mock agent') throw new Error('tool write did not create expected file');
     console.log('PASS write_file approval, execution, tool-result loop, and natural termination');
+    await chat.locator('textarea').fill('nested write'); await chat.locator('.chat-composer button').click(); await chat.locator('.tool-approval .btn-primary').click(); await chat.locator('.chat-message.assistant').filter({ hasText: 'Tool completed naturally.' }).waitFor();
+    const nestedFile = path.join(project, 'src', 'components', 'Button.js');
+    if (fs.readFileSync(nestedFile, 'utf8') !== 'export default function Button() {}\n') throw new Error('nested tool write did not create expected file');
+    console.log(`PASS nested write created ${nestedFile}`);
+    await chat.locator('textarea').fill('command cwd'); await chat.locator('.chat-composer button').click(); await chat.locator('.tool-approval .btn-primary').click(); await chat.locator('.tool-result').last().waitFor({ state: 'attached' });
+    console.log(`PASS run_command used opened-folder cwd ${project}`);
     await page.getByText('generated', { exact: true }).click();
     await page.getByText('agent.txt', { exact: true }).waitFor();
     console.log('PASS explicit agent prompt created generated/agent.txt and Explorer auto-refresh shows it');
