@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCustomModels: () => ipcRenderer.invoke('custom-models:list'),
   saveCustomModels: (models) => ipcRenderer.invoke('custom-models:save', models),
   testCustomModel: (model) => ipcRenderer.invoke('custom-models:test', model),
+  fetchAvailableModels: (model) => ipcRenderer.invoke('custom-models:fetch-models', model),
   sendCustomModelChat: (payload) => ipcRenderer.invoke('custom-models:chat', payload),
   decideCustomModelTool: (callId, approved) => ipcRenderer.invoke('custom-models:tool-decision', { callId, approved }),
   onCustomModelToken: (callback) => { const h = (e, data) => callback(data); ipcRenderer.on('custom-model:token', h); return () => ipcRenderer.removeListener('custom-model:token', h); },

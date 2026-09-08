@@ -5,10 +5,16 @@ class CustomModelPane {
     this._loadingEl = null; this._loadingTimers = [];
     this._createDOM();
   }
-  async init() { this.setStatus('running'); }
+  async init() {
+    this.setStatus('running');
+    const result = await window.electronAPI.testCustomModel(this.model);
+    if (!result.success) {
+      this.disconnect(result.error);
+    }
+  }
   _createDOM() {
     this.container = document.createElement('div'); this.container.className = 'terminal-pane custom-model-pane'; this.container.dataset.paneId = this.id;
-    this.container.innerHTML = `<div class="pane-header"><div class="pane-header-left"><span class="status-dot status-idle"></span><input class="pane-label-input" value="${this.escapeHtml(this.label)}" aria-label="Pane label"><button class="custom-cwd" type="button" title="Choose project folder">${this.escapeHtml(this.cwd || 'Project root')}</button><span class="custom-model-badge">${this.escapeHtml(this.model.type === 'ollama' ? 'Ollama' : 'OpenAI API')}</span></div><div class="pane-header-right"><label class="tool-approve-toggle" title="Allow writes and commands without a prompt"><input type="checkbox"> Auto approve</label><button class="pane-action-btn btn-reconnect" type="button">Reconnect</button><button class="pane-action-btn btn-restart-pane" type="button">Restart</button><button class="pane-action-btn btn-kill-pane" type="button">Kill</button><button class="pane-action-btn btn-close-pane" type="button">Close</button></div></div><div class="chat-body"><div class="chat-messages" aria-live="polite"></div><div class="chat-disconnected hidden"><strong>Disconnected</strong><span class="disconnect-detail"></span><button class="btn btn-primary btn-reconnect" type="button">Reconnect</button></div><form class="chat-composer"><textarea placeholder="Message ${this.escapeHtml(this.model.name)}\u2026" rows="2" aria-label="Chat message"></textarea><button class="btn btn-primary" type="submit">Send</button></form></div>`;
+    this.container.innerHTML = `<div class="pane-header"><div class="pane-header-left"><span class="status-dot status-idle"></span><input class="pane-label-input" value="${this.escapeHtml(this.label)}" aria-label="Pane label"><button class="custom-cwd" type="button" title="Choose project folder">${this.escapeHtml(this.cwd || 'Project root')}</button><span class="custom-model-badge">${this.escapeHtml(this.model.type === 'ollama' ? 'Ollama' : 'OpenAI API')}</span></div><div class="pane-header-right"><label class="tool-approve-toggle" title="Allow writes and commands without a prompt"><input type="checkbox"> Auto approve</label><button class="pane-action-btn btn-reconnect" type="button">Reconnect</button><button class="pane-action-btn btn-restart-pane" type="button">Restart</button><button class="pane-action-btn btn-kill-pane" type="button">Kill</button><button class="pane-action-btn btn-close-pane" type="button">Close</button></div></div><div class="chat-body"><div class="chat-messages" aria-live="polite"></div><div class="chat-disconnected hidden"><strong class="disconnect-badge">Disconnected</strong><span class="disconnect-detail"></span><button class="btn btn-primary btn-reconnect" type="button">Reconnect</button></div><form class="chat-composer"><textarea placeholder="Message ${this.escapeHtml(this.model.name)}\u2026" rows="2" aria-label="Chat message"></textarea><button class="btn btn-primary" type="submit">Send</button></form></div>`;
     this.statusDot = this.container.querySelector('.status-dot'); this.messagesEl = this.container.querySelector('.chat-messages'); this.composer = this.container.querySelector('.chat-composer'); this.input = this.composer.querySelector('textarea'); this.disconnectedEl = this.container.querySelector('.chat-disconnected');
     this.container.addEventListener('mousedown', () => this.onFocus?.(this.id));
     this.container.querySelector('.pane-label-input').addEventListener('change', (e) => { this.label = e.target.value.trim() || this.label; this.onLabelChange?.(this.id, this.label); });
@@ -59,7 +65,31 @@ class CustomModelPane {
       const idx = this.messages.indexOf(this._activeMessage);
       if (idx >= 0) this.messages.splice(idx, 1);
     }
-    this._activeMessage = null; this.input.disabled = true; this.disconnectedEl.classList.remove('hidden'); this.disconnectedEl.querySelector('.disconnect-detail').textContent = ` \u2014 ${error}`; this.setStatus('disconnected');
+    this._activeMessage = null;
+    this.input.disabled = true;
+    this.disconnectedEl.classList.remove('hidden');
+    this.disconnectedEl.classList.remove('disconnected-unreachable', 'disconnected-model-not-found');
+
+    const badgeEl = this.disconnectedEl.querySelector('.disconnect-badge');
+    const detailEl = this.disconnectedEl.querySelector('.disconnect-detail');
+    const errStr = String(error || '').trim();
+
+    const isModelNotFound = /model .* not found|not found on (this )?server/i.test(errStr);
+    const isUnreachable = /server unreachable|connection refused|timed? ?out|econnrefused|enotfound|abort/i.test(errStr);
+
+    if (isModelNotFound) {
+      this.disconnectedEl.classList.add('disconnected-model-not-found');
+      if (badgeEl) badgeEl.textContent = 'Model Not Found';
+      if (detailEl) detailEl.textContent = errStr ? ` \u2014 ${errStr}` : '';
+    } else if (isUnreachable) {
+      this.disconnectedEl.classList.add('disconnected-unreachable');
+      if (badgeEl) badgeEl.textContent = 'Server Unreachable';
+      if (detailEl) detailEl.textContent = errStr ? ` \u2014 ${errStr}` : '';
+    } else {
+      if (badgeEl) badgeEl.textContent = 'Disconnected';
+      if (detailEl) detailEl.textContent = errStr ? ` \u2014 ${errStr}` : '';
+    }
+    this.setStatus('disconnected');
   }
   showToolCall(call) {
     this._clearLoading();

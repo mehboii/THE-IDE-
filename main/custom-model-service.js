@@ -47,10 +47,17 @@ async function request(url, options = {}, timeout = CONNECT_TIMEOUT_MS) {
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
-    // Node's fetch often exposes the useful network reason (for example
-    // ECONNREFUSED) on `cause`, rather than its generic "fetch failed" text.
-    const reason = error.name === 'AbortError' ? `Connection timed out after ${timeout / 1000}s` : (error.cause?.message || error.message);
-    throw new Error(reason);
+    const isTimeout = error.name === 'AbortError' || error.message?.includes('timeout');
+    const isRefused = error.cause?.code === 'ECONNREFUSED' || error.code === 'ECONNREFUSED';
+    const isDns = error.cause?.code === 'ENOTFOUND' || error.code === 'ENOTFOUND';
+    let detail = '';
+    if (isTimeout) detail = `Connection timed out after ${timeout / 1000}s`;
+    else if (isRefused) detail = `Connection refused (${error.cause?.message || 'port closed or nothing listening'})`;
+    else if (isDns) detail = `Host not found / DNS failure (${error.cause?.message || 'unknown host'})`;
+    else detail = error.cause?.message || error.message;
+    const err = new Error(`Server unreachable: ${detail}`);
+    err.code = error.cause?.code || error.code;
+    throw err;
   } finally { clearTimeout(timer); }
 }
 
@@ -116,13 +123,77 @@ async function modelCapability(model) {
   return { supported: knownToolFamilies.test(String(model.model || '')), source: 'known-family' };
 }
 
+async function fetchAvailableModels(model) {
+  try {
+    const isOllama = model.type === 'ollama';
+    const url = endpointUrl(model, isOllama ? '/api/tags' : '/v1/models');
+    const response = await request(url, { headers: headers(model) });
+    if (!response.ok) {
+      let detail = '';
+      try {
+        const text = await response.text();
+        const parsed = JSON.parse(text);
+        detail = parsed.error || parsed.message || text;
+      } catch (_) {}
+      const authHint = (response.status === 401 || response.status === 403) ? ' \u2014 check API key' : '';
+      if (response.status === 404) {
+        throw new Error(`Endpoint not found (HTTP 404) on ${url} \u2014 verify host, port, and protocol (server does not expose a valid ${isOllama ? 'Ollama' : 'OpenAI'} API)`);
+      }
+      throw new Error(detail ? `HTTP ${response.status} ${response.statusText}${authHint}: ${detail}` : `HTTP ${response.status} ${response.statusText}${authHint}`);
+    }
+    const body = await response.json();
+    let models = [];
+    if (isOllama) {
+      if (Array.isArray(body.models)) {
+        models = body.models.map((m) => (typeof m === 'string' ? m : (m.name || m.model || ''))).filter(Boolean);
+      } else if (Array.isArray(body)) {
+        models = body.map((m) => (typeof m === 'string' ? m : (m.name || m.model || ''))).filter(Boolean);
+      }
+    } else {
+      const list = Array.isArray(body.data) ? body.data : (Array.isArray(body.models) ? body.models : []);
+      models = list.map((m) => (typeof m === 'string' ? m : (m.id || m.name || ''))).filter(Boolean);
+    }
+    return { success: true, url, models };
+  } catch (error) {
+    return { success: false, error: error.message, models: [] };
+  }
+}
+
+function matchesModelName(configured, availableList) {
+  if (!configured) return true;
+  if (!availableList || !availableList.length) return false;
+  if (availableList.includes(configured)) return true;
+  if (!configured.includes(':') && availableList.includes(`${configured}:latest`)) return true;
+  if (configured.endsWith(':latest') && availableList.includes(configured.slice(0, -7))) return true;
+  return false;
+}
+
+async function verifyModelAvailable(model) {
+  const result = await fetchAvailableModels(model);
+  if (!result.success) {
+    throw new Error(result.error);
+  }
+  const models = result.models || [];
+  const configured = String(model.model || '').trim();
+  if (configured && !matchesModelName(configured, models)) {
+    const availableText = models.length ? models.join(', ') : '(none - no models pulled on server)';
+    throw new Error(`Model '${configured}' not found on this server. Available models: ${availableText}`);
+  }
+  return { url: result.url, models };
+}
+
 async function testConnection(model) {
   try {
-    const url = endpointUrl(model, model.type === 'ollama' ? '/api/tags' : '/v1/models');
-    const response = await request(url, { headers: headers(model) });
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' \u2014 check API key' : ''}`);
+    const { url, models } = await verifyModelAvailable(model);
     const capability = await modelCapability(model);
-    return { success: true, message: `Connected to ${url}`, toolCapable: capability.supported, capabilitySource: capability.source };
+    return {
+      success: true,
+      message: `Connected to ${url}`,
+      toolCapable: capability.supported,
+      capabilitySource: capability.source,
+      models,
+      availableModels: models
+    };
   } catch (error) { return { success: false, error: error.message }; }
 }
 
@@ -179,7 +250,7 @@ async function streamOllamaAgent(webContents, paneId, requestId, model, messages
     const requestBody = { model: liveModel.model, messages: history, stream: true, ...(agentic ? { tools: TOOL_SCHEMA } : {}) };
     customModelTrace('ollama.chat.request', { paneId, requestId, iteration, method: 'POST', url, body: requestBody, capturedModel: modelConnection(model), dispatchedModel: modelConnection(liveModel) });
     const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(requestBody) }, CHAT_TIMEOUT_MS);
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    if (!response.ok) throw await handleHttpError(response, liveModel.model);
     const answer = await readOllamaResponse(response, (token) => webContents.send('custom-model:token', { paneId, requestId, token }));
     history.push({ role: 'assistant', content: answer.content, ...(answer.toolCalls.length ? { tool_calls: answer.toolCalls } : {}) });
     if (!agentic || !answer.toolCalls.length) { webContents.send('custom-model:done', { paneId, requestId }); return; }
@@ -199,11 +270,29 @@ async function streamOllamaAgent(webContents, paneId, requestId, model, messages
   webContents.send('custom-model:done', { paneId, requestId });
 }
 
+async function handleHttpError(response, configuredModel) {
+  let detail = '';
+  try {
+    const text = await response.text();
+    const parsed = JSON.parse(text);
+    detail = parsed.error?.message || parsed.error || parsed.message || text;
+  } catch (_) {}
+  const authHint = (response.status === 401 || response.status === 403) ? ' \u2014 check API key' : '';
+  if (response.status === 404) {
+    if (detail && detail.includes('not found')) {
+      return new Error(`Model '${configuredModel}' not found on server (${detail})`);
+    }
+    return new Error(`Endpoint or model '${configuredModel}' not found (HTTP 404 Not Found${detail ? `: ${detail}` : ''})`);
+  }
+  return new Error(detail ? `HTTP ${response.status} ${response.statusText}${authHint}: ${detail}` : `HTTP ${response.status} ${response.statusText}${authHint}`);
+}
+
 async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApprove = false, maxIterations = 25) {
   const requestId = randomUUID();
   const initialLiveModel = resolveLiveModel(model);
   customModelTrace('streamChat.enter', { paneId, requestId, capturedModel: modelConnection(model), initialLiveModel: modelConnection(initialLiveModel), messageCount: Array.isArray(messages) ? messages.length : 0 });
   try {
+    await verifyModelAvailable(initialLiveModel);
     const agentic = initialLiveModel.type === 'ollama' && isToolCapable(initialLiveModel);
     // Only tool-enabled Ollama requests need a project root. Plain chat must
     // remain usable before a folder is opened, just like OpenAI-compatible chat.
@@ -219,7 +308,7 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
     const body = { model: liveModel.model, messages, stream: true };
     customModelTrace('openai.chat.request', { paneId, requestId, method: 'POST', url, body, capturedModel: modelConnection(model), dispatchedModel: modelConnection(liveModel) });
     const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(body) }, CHAT_TIMEOUT_MS);
-    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}${response.status === 401 || response.status === 403 ? ' \u2014 check API key' : ''}`);
+    if (!response.ok) throw await handleHttpError(response, liveModel.model);
     if (!response.body) throw new Error('The endpoint returned no response stream.');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -248,4 +337,4 @@ async function streamChat(webContents, paneId, model, messages, cwd, fullAutoApp
   return { requestId };
 }
 
-module.exports = { testConnection, streamChat, resolveApproval };
+module.exports = { testConnection, fetchAvailableModels, streamChat, resolveApproval };

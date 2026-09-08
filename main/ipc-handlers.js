@@ -91,6 +91,7 @@ function registerIpcHandlers({ openEditorFile } = {}) {
   ipcMain.handle('custom-models:list', () => customModelStore.list());
   ipcMain.handle('custom-models:save', (event, models) => customModelStore.save(models));
   ipcMain.handle('custom-models:test', (event, model) => customModelService.testConnection(model));
+  ipcMain.handle('custom-models:fetch-models', (event, model) => customModelService.fetchAvailableModels(model));
   ipcMain.handle('custom-models:chat', (event, payload) => customModelService.streamChat(event.sender, payload.paneId, payload.model, payload.messages, payload.cwd, payload.fullAutoApprove, payload.maxIterations));
   ipcMain.handle('custom-models:tool-decision', (event, { callId, approved }) => customModelService.resolveApproval(callId, approved));
 
