@@ -13,33 +13,81 @@ function modelConnection(model) {
   if (!model) return null;
   return { id: model.id || null, type: model.type || null, host: model.host || null, baseUrl: model.baseUrl || null, port: model.port || null, model: model.model || null, toolCapable: model.toolCapable };
 }
-
-function resolveLiveModel(capturedModel) {
+function resolveLiveModel(capturedModel) {
   if (!capturedModel?.id) return capturedModel;
   const savedModel = customModelStore.list().find((candidate) => candidate.id === capturedModel.id);
   return savedModel || capturedModel;
 }
 
+function normalizeOllamaEndpoint(model) {
+  let hostStr = String(model.baseUrl || model.host || '').trim();
+  if (!hostStr) throw new Error('Host/IP address is required.');
+
+  let protocol = 'http:';
+  const protoMatch = hostStr.match(/^([a-z]+:)\/\//i);
+  if (protoMatch) {
+    protocol = protoMatch[1].toLowerCase();
+    hostStr = hostStr.slice(protoMatch[0].length);
+  }
+
+  // Strip path segments like /api, /api/tags, /v1, or trailing slashes
+  hostStr = hostStr.replace(/\/.*$/, '');
+
+  let host = hostStr;
+  let port = '';
+
+  // Check if host already contains a port (e.g. 192.168.1.47:11436 or [::1]:11436)
+  const colonIdx = hostStr.lastIndexOf(':');
+  if (colonIdx !== -1 && !hostStr.endsWith(']')) {
+    host = hostStr.slice(0, colonIdx);
+    port = hostStr.slice(colonIdx + 1);
+  }
+
+  // If model.port is specified, it takes precedence
+  if (model.port != null && String(model.port).trim() !== '') {
+    port = String(model.port).trim().replace(/^:/, '');
+  }
+
+  const portPart = port ? `:${port}` : '';
+  const base = `${protocol}//${host}${portPart}`;
+  return { protocol, host, port, base };
+}
+
 function baseUrl(model) {
-  // `host` is the original field name. `baseUrl` is also accepted so callers
-  // can pass an OpenAI-compatible URL such as http://host:1234/v1 directly.
+  if (model.type === 'ollama') {
+    return normalizeOllamaEndpoint(model).base;
+  }
   const host = String(model.baseUrl || model.host || '').trim().replace(/\/$/, '');
   if (!host) throw new Error('Host/IP address is required.');
   const protocol = /^https?:\/\//i.test(host) ? '' : 'http://';
-  const port = model.port ? `:${String(model.port).replace(/^:/, '')}` : '';
+  let port = '';
+  if (model.port && !host.includes(`:${model.port}`)) {
+    port = `:${String(model.port).replace(/^:/, '')}`;
+  }
   return `${protocol}${host}${port}`;
 }
 
 function endpointUrl(model, path) {
+  if (model.type === 'ollama') {
+    const { base } = normalizeOllamaEndpoint(model);
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    return `${base}${cleanPath}`;
+  }
   const base = baseUrl(model);
   // Accept both a host root and a standard OpenAI base URL ending in /v1.
-  // Without this normalization, http://host/v1 silently became /v1/v1/\u2026 .
   if (model.type === 'openai' && /\/v1$/i.test(base) && /^\/v1\//i.test(path)) return `${base}${path.slice(3)}`;
-  // Likewise, allow an Ollama API root to be supplied without duplicating /api.
-  if (model.type === 'ollama' && /\/api$/i.test(base) && /^\/api\//i.test(path)) return `${base}${path.slice(4)}`;
   return `${base}${path}`;
 }
 
+function ollamaLog(event, details = {}) {
+  const parts = [`[OLLAMA] ${event}`];
+  for (const [key, val] of Object.entries(details)) {
+    if (val !== undefined && val !== null) {
+      parts.push(`${key}: ${typeof val === 'object' ? JSON.stringify(val) : val}`);
+    }
+  }
+  console.log(parts.join(' | '));
+}
 
 async function request(url, options = {}, timeout = CONNECT_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -111,23 +159,69 @@ function headers(model) {
 
 function isToolCapable(model) { return model.type === 'ollama' && model.toolCapable !== false && knownToolFamilies.test(String(model.model || '')); }
 
-async function modelCapability(model) {
+async function modelCapability(model, showData = null) {
   if (model.type !== 'ollama') return { supported: false, source: 'not-ollama' };
   try {
-    const response = await request(endpointUrl(model, '/api/show'), { method: 'POST', headers: headers(model), body: JSON.stringify({ name: model.model }) });
-    if (response.ok) {
-      const body = await response.json();
-      if (Array.isArray(body.capabilities)) return { supported: body.capabilities.includes('tools'), source: 'ollama' };
+    let body = showData;
+    if (!body) {
+      const response = await request(endpointUrl(model, '/api/show'), { method: 'POST', headers: headers(model), body: JSON.stringify({ name: model.model }) });
+      if (response.ok) body = await response.json();
     }
+    if (body && Array.isArray(body.capabilities)) return { supported: body.capabilities.includes('tools'), source: 'ollama' };
   } catch (_) { /* capability endpoint is optional across Ollama versions */ }
   return { supported: knownToolFamilies.test(String(model.model || '')), source: 'known-family' };
+}
+
+async function verifyModelShow(model, configured) {
+  const url = endpointUrl(model, '/api/show');
+  ollamaLog('requested model', { model: configured });
+  ollamaLog('POST /api/show', { endpoint: url, name: configured });
+  let response;
+  try {
+    response = await request(url, { method: 'POST', headers: headers(model), body: JSON.stringify({ name: configured }) });
+  } catch (error) {
+    ollamaLog('validation result', { ok: false, error: error.message });
+    throw new Error(`Unable to reach Ollama server at ${url} (${error.message}).`);
+  }
+  ollamaLog('validation result', { ok: response.ok, status: response.status });
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const text = await response.text();
+      const parsed = JSON.parse(text);
+      detail = parsed.error || parsed.message || text;
+    } catch (_) {}
+    throw new Error(`Server reachable, but model '${configured}' could not be verified (api/show returned ${response.status}${detail ? `: ${detail}` : ''}) \u2014 check the model name matches exactly what's pulled on the server, or check if something other than Ollama is responding on this port.`);
+  }
+  try {
+    return await response.json();
+  } catch (_) {
+    return {};
+  }
 }
 
 async function fetchAvailableModels(model) {
   try {
     const isOllama = model.type === 'ollama';
     const url = endpointUrl(model, isOllama ? '/api/tags' : '/v1/models');
-    const response = await request(url, { headers: headers(model) });
+    if (isOllama) {
+      const { base } = normalizeOllamaEndpoint(model);
+      ollamaLog('base URL', { url: base });
+      ollamaLog('GET /api/tags', { endpoint: url });
+    }
+    let response;
+    try {
+      response = await request(url, { headers: headers(model) });
+    } catch (reqErr) {
+      if (isOllama) {
+        const { host, port } = normalizeOllamaEndpoint(model);
+        throw new Error(`Unable to reach Ollama server at ${host}${port ? `:${port}` : ''} (${reqErr.message}).`);
+      }
+      throw reqErr;
+    }
+    if (isOllama) {
+      ollamaLog('HTTP status', { status: response.status, statusText: response.statusText });
+    }
     if (!response.ok) {
       let detail = '';
       try {
@@ -136,6 +230,10 @@ async function fetchAvailableModels(model) {
         detail = parsed.error || parsed.message || text;
       } catch (_) {}
       const authHint = (response.status === 401 || response.status === 403) ? ' \u2014 check API key' : '';
+      if (isOllama) {
+        const { host, port } = normalizeOllamaEndpoint(model);
+        throw new Error(`Ollama server at ${host}${port ? `:${port}` : ''} is reachable, but /api/tags failed (HTTP ${response.status}${detail ? `: ${detail}` : ''}).`);
+      }
       if (response.status === 404) {
         throw new Error(`Endpoint not found (HTTP 404) on ${url} \u2014 verify host, port, and protocol (server does not expose a valid ${isOllama ? 'Ollama' : 'OpenAI'} API)`);
       }
@@ -149,22 +247,43 @@ async function fetchAvailableModels(model) {
       } else if (Array.isArray(body)) {
         models = body.map((m) => (typeof m === 'string' ? m : (m.name || m.model || ''))).filter(Boolean);
       }
+      ollamaLog('discovered models', { count: models.length, models });
     } else {
       const list = Array.isArray(body.data) ? body.data : (Array.isArray(body.models) ? body.models : []);
       models = list.map((m) => (typeof m === 'string' ? m : (m.id || m.name || ''))).filter(Boolean);
     }
-    return { success: true, url, models };
+    let unverifiedModels = [];
+    if (isOllama && models.length > 0) {
+      const results = await Promise.allSettled(models.map(async (m) => {
+        const res = await request(endpointUrl(model, '/api/show'), {
+          method: 'POST',
+          headers: headers(model),
+          body: JSON.stringify({ name: m })
+        }, 3000);
+        return { name: m, ok: res.ok };
+      }));
+      for (const r of results) {
+        if (r.status !== 'fulfilled' || !r.value?.ok) {
+          const modelName = r.status === 'fulfilled' ? r.value.name : null;
+          if (modelName) unverifiedModels.push(modelName);
+        }
+      }
+    }
+    return { success: true, url, models, unverifiedModels };
   } catch (error) {
-    return { success: false, error: error.message, models: [] };
+    return { success: false, error: error.message, models: [], unverifiedModels: [] };
   }
 }
 
 function matchesModelName(configured, availableList) {
   if (!configured) return true;
   if (!availableList || !availableList.length) return false;
-  if (availableList.includes(configured)) return true;
-  if (!configured.includes(':') && availableList.includes(`${configured}:latest`)) return true;
-  if (configured.endsWith(':latest') && availableList.includes(configured.slice(0, -7))) return true;
+  const target = String(configured).trim();
+  if (availableList.includes(target)) return true;
+  const lower = target.toLowerCase();
+  if (availableList.some((m) => m.toLowerCase() === lower)) return true;
+  if (!target.includes(':') && availableList.includes(`${target}:latest`)) return true;
+  if (target.endsWith(':latest') && availableList.includes(target.slice(0, -7))) return true;
   return false;
 }
 
@@ -175,20 +294,33 @@ async function verifyModelAvailable(model) {
   }
   const models = result.models || [];
   const configured = String(model.model || '').trim();
-  if (configured && !matchesModelName(configured, models)) {
-    const availableText = models.length ? models.join(', ') : '(none - no models pulled on server)';
-    throw new Error(`Model '${configured}' not found on this server. Available models: ${availableText}`);
+  if (configured) {
+    if (models.length === 0) {
+      if (model.type === 'ollama') {
+        throw new Error('Ollama server is reachable, but /api/tags returned no models.');
+      }
+      throw new Error(`Model '${configured}' not found on this server. Available models: (none - no models pulled on server)`);
+    }
+    if (!matchesModelName(configured, models)) {
+      throw new Error(`Model '${configured}' not found on this server. Available models: ${models.join(', ')}`);
+    }
   }
-  return { url: result.url, models };
+  let showData = null;
+  if (model.type === 'ollama' && configured) {
+    showData = await verifyModelShow(model, configured);
+  }
+  return { url: result.url, models, showData };
 }
 
 async function testConnection(model) {
   try {
-    const { url, models } = await verifyModelAvailable(model);
-    const capability = await modelCapability(model);
+    const { url, models, showData } = await verifyModelAvailable(model);
+    const capability = await modelCapability(model, showData);
+    const configured = String(model.model || '').trim();
+    const modelVerifiedText = configured ? `Model '${configured}' verified.` : 'Server reachable.';
     return {
       success: true,
-      message: `Connected to ${url}`,
+      message: `Connected to ${url}. ${modelVerifiedText}`,
       toolCapable: capability.supported,
       capabilitySource: capability.source,
       models,
@@ -248,6 +380,7 @@ async function streamOllamaAgent(webContents, paneId, requestId, model, messages
     const agentic = isToolCapable(liveModel);
     const url = endpointUrl(liveModel, '/api/chat');
     const requestBody = { model: liveModel.model, messages: history, stream: true, ...(agentic ? { tools: TOOL_SCHEMA } : {}) };
+    ollamaLog('POST /api/chat', { endpoint: url, model: liveModel.model, agentic });
     customModelTrace('ollama.chat.request', { paneId, requestId, iteration, method: 'POST', url, body: requestBody, capturedModel: modelConnection(model), dispatchedModel: modelConnection(liveModel) });
     const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(requestBody) }, CHAT_TIMEOUT_MS);
     if (!response.ok) throw await handleHttpError(response, liveModel.model);

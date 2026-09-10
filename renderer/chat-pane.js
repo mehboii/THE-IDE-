@@ -74,12 +74,12 @@ class CustomModelPane {
     const detailEl = this.disconnectedEl.querySelector('.disconnect-detail');
     const errStr = String(error || '').trim();
 
-    const isModelNotFound = /model .* not found|not found on (this )?server/i.test(errStr);
+    const isModelNotFound = /model .* not found|not found on (this )?server|could not be verified/i.test(errStr);
     const isUnreachable = /server unreachable|connection refused|timed? ?out|econnrefused|enotfound|abort/i.test(errStr);
 
     if (isModelNotFound) {
       this.disconnectedEl.classList.add('disconnected-model-not-found');
-      if (badgeEl) badgeEl.textContent = 'Model Not Found';
+      if (badgeEl) badgeEl.textContent = errStr.includes('could not be verified') ? 'Model Unverified' : 'Model Not Found';
       if (detailEl) detailEl.textContent = errStr ? ` \u2014 ${errStr}` : '';
     } else if (isUnreachable) {
       this.disconnectedEl.classList.add('disconnected-unreachable');

@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, '..');
 const requestLog = [];
 
 let mockServerModels = [{ name: 'mock-llama' }, { name: 'qwen3:8b' }];
+const mockShowFails = new Set();
 function response(res, message) { res.writeHead(200, { 'Content-Type': 'application/x-ndjson' }); res.end(JSON.stringify({ message, done: true }) + '\n'); }
 function tool(name, args) { return { content: '', tool_calls: [{ function: { name, arguments: args } }] }; }
 function mockServer() {
@@ -17,7 +18,20 @@ function mockServer() {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ models: mockServerModels }));
     }
-    if (req.method === 'POST' && req.url === '/api/show') return res.end(JSON.stringify({ capabilities: ['tools'] }));
+    if (req.method === 'POST' && req.url === '/api/show') {
+      let raw = ''; req.on('data', (chunk) => { raw += chunk; }); req.on('end', () => {
+        try {
+          const body = JSON.parse(raw);
+          if (mockShowFails.has(body.name)) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: `model '${body.name}' not found` }));
+          }
+        } catch (_) {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ capabilities: ['tools'] }));
+      });
+      return;
+    }
     if (req.method === 'GET' && req.url === '/v1/models') { requestLog.push({ url: req.url, authorization: req.headers.authorization }); return res.end(JSON.stringify({ data: [{ id: 'mock-openai' }] })); }
     if (req.method === 'POST' && req.url === '/v1/chat/completions') {
       let raw = ''; req.on('data', (chunk) => { raw += chunk; }); req.on('end', () => {
@@ -112,51 +126,64 @@ function mockServer() {
     console.log('PASS missing model pane displays distinct Model Not Found banner');
     await page.evaluate(() => window.appInstance.removePane('missing-model-pane'));
 
-    // Dropdown UI State 1: Populated /api/tags auto-populates and auto-selects default without clicking Refresh
-    await page.evaluate((m) => window.appInstance.openCustomModelModal({ ...m, model: '' }), agent);
-    await page.waitForFunction(() => {
-      const select = document.getElementById('custom-model-select');
-      return select && select.options.length === 2 && select.options[0].value === 'mock-llama';
-    });
-    const isSelect = await page.evaluate(() => document.getElementById('custom-model-select').tagName.toLowerCase());
-    if (isSelect !== 'select') throw new Error(`Expected custom-model-select to be a select tag, got: ${isSelect}`);
-    const selectedVal = await page.evaluate(() => document.getElementById('custom-model-select').value);
-    if (selectedVal !== 'mock-llama') throw new Error(`Expected auto-selected model 'mock-llama', got: '${selectedVal}'`);
-    const resultTextPopulated = await page.evaluate(() => document.getElementById('custom-model-test-result').textContent);
-    if (!resultTextPopulated.includes('Found 2 model(s) on server')) throw new Error(`Expected found count, got: ${resultTextPopulated}`);
-    await page.evaluate(() => window.appInstance.closeCustomModelModal());
-    console.log('PASS State 1: Populated /api/tags auto-detects real models and selects default automatically');
-
-    // Dropdown UI State 2: Genuinely empty /api/tags shows actionable guidance
-    mockServerModels = [];
+    // Custom Model Modal: Text input field for model name/tag
     await page.evaluate((m) => window.appInstance.openCustomModelModal(m), agent);
-    await page.waitForFunction(() => {
-      const el = document.getElementById('custom-model-test-result');
-      return el && el.classList.contains('warning');
+    const isTextInput = await page.evaluate(() => {
+      const input = document.querySelector('#custom-model-form input[name="model"]');
+      return input && input.tagName.toLowerCase() === 'input' && input.type === 'text' && input.value === 'qwen3:8b';
     });
-    const resultTextEmpty = await page.evaluate(() => document.getElementById('custom-model-test-result').textContent);
-    if (!resultTextEmpty.includes('No models pulled on this server yet') || !resultTextEmpty.includes('ollama pull')) {
-      throw new Error(`Expected actionable empty message, got: ${resultTextEmpty}`);
-    }
-    const emptySelectText = await page.evaluate(() => document.getElementById('custom-model-select').options[0]?.textContent);
-    if (!emptySelectText.includes('No models pulled on server yet')) throw new Error(`Expected empty option text, got: ${emptySelectText}`);
+    if (!isTextInput) throw new Error('Expected custom model input[name="model"] to be a text input with prefilled value');
     await page.evaluate(() => window.appInstance.closeCustomModelModal());
-    console.log('PASS State 2: Genuinely empty server displays actionable "no models pulled yet" guidance');
+    console.log('PASS Custom Model Modal uses standard text input for model name / tag');
 
-    // Dropdown UI State 3: Unreachable server shows distinct error state
-    await page.evaluate((m) => window.appInstance.openCustomModelModal({ ...m, port: '65530' }), agent);
+    // Scenario 1: /api/tags succeeds with model listed, but /api/show returns 404
+    mockServerModels = [{ name: 'qwen2.5-coder:1.5b' }];
+    mockShowFails.add('qwen2.5-coder:1.5b');
+    const partialFailModel = { id: 'partial-fail', name: 'Qwen Partial Fail', host: '127.0.0.1', port: String(port), type: 'ollama', model: 'qwen2.5-coder:1.5b', apiKey: '' };
+    const partialResult = await page.evaluate((m) => window.electronAPI.testCustomModel(m), partialFailModel);
+    if (partialResult.success) {
+      throw new Error(`Expected testCustomModel to fail when /api/show returns 404, but got success: ${JSON.stringify(partialResult)}`);
+    }
+    const expectedErrMsg = "Server reachable, but model 'qwen2.5-coder:1.5b' could not be verified (api/show returned 404: model 'qwen2.5-coder:1.5b' not found) \u2014 check the model name matches exactly what's pulled on the server, or check if something other than Ollama is responding on this port.";
+    if (!partialResult.error || !partialResult.error.includes(expectedErrMsg)) {
+      throw new Error(`Expected specific error message, got: ${partialResult.error}`);
+    }
+    console.log('PASS Scenario 1 (IPC): /api/tags succeeds but /api/show 404 reports specific partial-failure error');
+
+    // UI test for Scenario 1 in the custom model modal
+    await page.evaluate((m) => window.appInstance.openCustomModelModal(m), partialFailModel);
+    // Clicking "Test Connection" in modal updates UI with error styling and exact message without "Connected"
+    await page.evaluate(() => window.appInstance.testCustomModel());
     await page.waitForFunction(() => {
       const el = document.getElementById('custom-model-test-result');
       return el && el.classList.contains('error');
     });
-    const resultTextUnreachable = await page.evaluate(() => document.getElementById('custom-model-test-result').textContent);
-    if (!resultTextUnreachable.includes('Server unreachable') || !resultTextUnreachable.includes('Connection refused')) {
-      throw new Error(`Expected Server unreachable message, got: ${resultTextUnreachable}`);
+    const modalErrorText = await page.evaluate(() => document.getElementById('custom-model-test-result').textContent);
+    if (!modalErrorText.includes(expectedErrMsg) || modalErrorText.includes('Connected')) {
+      throw new Error(`Modal test connection error text unexpected: ${modalErrorText}`);
     }
-    const unreachableSelectText = await page.evaluate(() => document.getElementById('custom-model-select').options[0]?.textContent);
-    if (!unreachableSelectText.includes('Server unreachable')) throw new Error(`Expected unreachable option, got: ${unreachableSelectText}`);
     await page.evaluate(() => window.appInstance.closeCustomModelModal());
-    console.log('PASS State 3: Unreachable server displays distinct error not conflated with empty list');
+    console.log('PASS Scenario 1 (UI): Test Connection reports specific error without "Connected"');
+
+    // Scenario 2: Fully working case (both /api/tags and /api/show succeed)
+    mockShowFails.clear();
+    mockServerModels = [{ name: 'qwen2.5-coder:1.5b' }];
+    const fullyWorkingResult = await page.evaluate((m) => window.electronAPI.testCustomModel(m), partialFailModel);
+    if (!fullyWorkingResult.success) {
+      throw new Error(`Expected fully working case to succeed, but got error: ${fullyWorkingResult.error}`);
+    }
+    await page.evaluate((m) => window.appInstance.openCustomModelModal(m), partialFailModel);
+    await page.evaluate(() => window.appInstance.testCustomModel());
+    await page.waitForFunction(() => {
+      const el = document.getElementById('custom-model-test-result');
+      return el && el.classList.contains('success');
+    });
+    const workingUiText = await page.evaluate(() => document.getElementById('custom-model-test-result').textContent);
+    if (!workingUiText.includes('Connected to http://') || workingUiText.includes('could not be verified')) {
+      throw new Error(`Expected clean connected UI text, got: ${workingUiText}`);
+    }
+    await page.evaluate(() => window.appInstance.closeCustomModelModal());
+    console.log('PASS Scenario 2: Fully-working case displays clean Connected status with no false negatives');
 
     // Restore mockServerModels
     mockServerModels = [{ name: 'mock-llama' }, { name: 'qwen3:8b' }];
