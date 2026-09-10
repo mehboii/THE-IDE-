@@ -836,15 +836,26 @@ class AppController {
   }
 
   openCustomModelModal(model = null) {
-    this._editingCustomModelId = model?.id || null; this._detectedToolCapable = model?.toolCapable; this.customModelForm.reset(); this.customModelTestResult.textContent = '';
-    ['name', 'host', 'port', 'type', 'model', 'apiKey'].forEach((key) => { if (model?.[key] != null) this.customModelForm.elements[key].value = model[key]; });
+    this._editingCustomModelId = model?.id || null;
+    this._detectedToolCapable = model?.toolCapable;
+    this.customModelForm.reset();
+    this.customModelTestResult.textContent = '';
+    this.customModelTestResult.className = 'custom-model-test-result';
+    ['name', 'host', 'port', 'type', 'model', 'apiKey'].forEach((key) => {
+      if (model?.[key] != null && this.customModelForm.elements[key]) {
+        this.customModelForm.elements[key].value = model[key];
+      }
+    });
     document.getElementById('custom-model-title').textContent = model ? 'Edit Custom Model' : 'Add Custom Model';
-    document.getElementById('btn-delete-custom-model').classList.toggle('hidden', !model); this.modalCustomModel.classList.remove('hidden');
+    document.getElementById('btn-delete-custom-model').classList.toggle('hidden', !model);
+    this.modalCustomModel.classList.remove('hidden');
   }
-  closeCustomModelModal() { this.modalCustomModel.classList.add('hidden'); }
+  closeCustomModelModal() {
+    this.modalCustomModel.classList.add('hidden');
+  }
   customModelFromForm() { const data = Object.fromEntries(new FormData(this.customModelForm)); const likelyToolCapable = data.type === 'ollama' && /^(qwen3|qwen2\.5|llama3\.1|llama3\.2|mistral-nemo|mistral-small|command-r|hermes)/i.test(String(data.model || '')); const toolCapable = data.type === 'ollama' && (this._detectedToolCapable ?? likelyToolCapable); return { id: this._editingCustomModelId || `custom-${Date.now()}`, ...data, port: String(data.port).trim(), toolCapable }; }
   async saveCustomModel() { if (!this.customModelForm.reportValidity()) return; const model = this.customModelFromForm(); const i = this.customModels.findIndex((m) => m.id === model.id); if (i >= 0) this.customModels[i] = model; else this.customModels.push(model); this.customModels = await window.electronAPI.saveCustomModels(this.customModels); this.renderCustomModels(); this.closeCustomModelModal(); }
-  async testCustomModel() { if (!this.customModelForm.reportValidity()) return; const r = await window.electronAPI.testCustomModel(this.customModelFromForm()); if (r.success) this._detectedToolCapable = r.toolCapable; this.customModelTestResult.className = `custom-model-test-result ${r.success ? 'success' : 'error'}`; this.customModelTestResult.textContent = r.success ? `Connected: ${r.message}. ${r.toolCapable ? 'Tool calling available; agent mode will be enabled.' : 'Tool calling is not detected; this model will use plain chat.'}` : `Connection failed: ${r.error}`; }
+  async testCustomModel() { if (!this.customModelForm.reportValidity()) return; const r = await window.electronAPI.testCustomModel(this.customModelFromForm()); if (r.success) this._detectedToolCapable = r.toolCapable; this.customModelTestResult.className = `custom-model-test-result ${r.success ? 'success' : 'error'}`; this.customModelTestResult.textContent = r.success ? `${r.message}. ${r.toolCapable ? 'Tool calling available; agent mode will be enabled.' : 'Tool calling is not detected; this model will use plain chat.'}` : (r.error?.startsWith('Server reachable') ? r.error : `Connection failed: ${r.error}`); }
 
   openRunAgentModal({ targetPaneId, selectedAgentId }) {
     if (!this.modalRunAgent) return;

@@ -257,7 +257,9 @@
     <div class="modal-box"><div class="modal-header"><h3 id="custom-model-title">Custom Model</h3><button class="modal-close" id="modal-custom-model-close" type="button">&times;</button></div>
       <form id="custom-model-form" class="modal-body custom-model-form">
         <label>Display name <input name="name" class="text-input" required></label><label>Host / IP <input name="host" class="text-input" placeholder="192.168.1.20" required></label><label>Port <input name="port" class="text-input" placeholder="11434" required></label>
-        <label>Protocol <select name="type" class="select-input"><option value="ollama">Ollama API</option><option value="openai">OpenAI-Compatible API</option></select></label><label>Model name / tag <input name="model" class="text-input" placeholder="llama3:70b" required></label><label>API key (optional) <input name="apiKey" class="text-input" type="password"></label>
+        <label>Protocol <select name="type" class="select-input"><option value="ollama">Ollama API</option><option value="openai">OpenAI-Compatible API</option></select></label>
+        <label>Model name / tag <input name="model" class="text-input" placeholder="qwen2.5-coder:1.5b" required></label>
+        <label>API key (optional) <input name="apiKey" class="text-input" type="password"></label>
         <div id="custom-model-test-result" class="custom-model-test-result"></div>
       </form><div class="modal-footer"><button id="btn-delete-custom-model" class="btn btn-danger" type="button">Delete</button><button id="btn-test-custom-model" class="btn btn-secondary" type="button">Test Connection</button><button id="btn-save-custom-model" class="btn btn-primary" type="button">Save</button></div>
     </div>
