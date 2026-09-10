@@ -841,17 +841,112 @@ class AppController {
     this.customModelForm.reset();
     this.customModelTestResult.textContent = '';
     this.customModelTestResult.className = 'custom-model-test-result';
-    ['name', 'host', 'port', 'type', 'model', 'apiKey'].forEach((key) => {
+    const modelSelect = document.getElementById('custom-model-select');
+    if (modelSelect) {
+      modelSelect.innerHTML = '<option value="" disabled selected>Enter host &amp; port to fetch models...</option>';
+    }
+    ['name', 'host', 'port', 'type', 'apiKey'].forEach((key) => {
       if (model?.[key] != null && this.customModelForm.elements[key]) {
         this.customModelForm.elements[key].value = model[key];
       }
     });
+    if (model?.model && modelSelect) {
+      modelSelect.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = model.model;
+      opt.textContent = model.model;
+      opt.selected = true;
+      modelSelect.appendChild(opt);
+      modelSelect.value = model.model;
+    }
     document.getElementById('custom-model-title').textContent = model ? 'Edit Custom Model' : 'Add Custom Model';
     document.getElementById('btn-delete-custom-model').classList.toggle('hidden', !model);
     this.modalCustomModel.classList.remove('hidden');
+
+    if (this._customModelPollInterval) clearInterval(this._customModelPollInterval);
+    if (this.customModelForm.elements['host']?.value?.trim() && this.customModelForm.elements['port']?.value?.trim()) {
+      this.fetchModelsForForm();
+    }
+    this._customModelPollInterval = setInterval(() => {
+      if (!this.modalCustomModel.classList.contains('hidden')) {
+        this.fetchModelsForForm({ silent: true });
+      }
+    }, 30_000);
   }
   closeCustomModelModal() {
+    if (this._customModelPollInterval) {
+      clearInterval(this._customModelPollInterval);
+      this._customModelPollInterval = null;
+    }
     this.modalCustomModel.classList.add('hidden');
+  }
+  async fetchModelsForForm(options = {}) {
+    const silent = Boolean(options?.silent);
+    const modelSelect = document.getElementById('custom-model-select');
+    if (!modelSelect) return;
+    const currentValue = modelSelect.value;
+    const partial = this.customModelFromForm();
+    if (!partial.host || !partial.port) {
+      modelSelect.innerHTML = '<option value="" disabled selected>Enter host &amp; port to fetch models...</option>';
+      if (!silent) {
+        this.customModelTestResult.className = 'custom-model-test-result error';
+        this.customModelTestResult.textContent = 'Enter Host/IP and Port first.';
+      }
+      return;
+    }
+    const hasOptions = modelSelect.options.length > 0 && modelSelect.options[0].value !== '';
+    if (!silent && !hasOptions) {
+      modelSelect.innerHTML = '<option value="" disabled selected>Loading models\u2026</option>';
+      modelSelect.disabled = true;
+      this.customModelTestResult.className = 'custom-model-test-result loading';
+      this.customModelTestResult.textContent = 'Querying server for available models\u2026';
+    }
+    try {
+      const result = await window.electronAPI.fetchAvailableModels(partial);
+      if (result.success && result.models && result.models.length > 0) {
+        modelSelect.innerHTML = '';
+        result.models.forEach((m) => {
+          const opt = document.createElement('option');
+          opt.value = m;
+          opt.textContent = m;
+          if (m === currentValue) opt.selected = true;
+          modelSelect.appendChild(opt);
+        });
+        if (currentValue && result.models.includes(currentValue)) {
+          modelSelect.value = currentValue;
+        } else {
+          modelSelect.selectedIndex = 0;
+        }
+        this.customModelTestResult.className = 'custom-model-test-result success';
+        this.customModelTestResult.textContent = `Found ${result.models.length} model(s) on server.`;
+      } else if (result.success && (!result.models || result.models.length === 0)) {
+        modelSelect.innerHTML = '<option value="" disabled selected>No models pulled on server yet</option>';
+        this.customModelTestResult.className = 'custom-model-test-result warning';
+        this.customModelTestResult.textContent = partial.type === 'ollama'
+          ? 'No models pulled on this server yet. Run "ollama pull <model-name>" on that machine, then hit Refresh.'
+          : 'No models found on this endpoint.';
+      } else {
+        modelSelect.innerHTML = '<option value="" disabled selected>Server unreachable \u2014 check host &amp; port</option>';
+        if (currentValue && partial.host === this._lastFetchedHost && partial.port === this._lastFetchedPort) {
+          const opt = document.createElement('option');
+          opt.value = currentValue;
+          opt.textContent = `${currentValue} (unverified)`;
+          opt.selected = true;
+          modelSelect.appendChild(opt);
+        }
+        this.customModelTestResult.className = 'custom-model-test-result error';
+        this.customModelTestResult.textContent = `Server unreachable: ${result.error}`;
+      }
+      this._lastFetchedHost = partial.host;
+      this._lastFetchedPort = partial.port;
+      this._lastFetchedType = partial.type;
+    } catch (err) {
+      modelSelect.innerHTML = '<option value="" disabled selected>Server unreachable \u2014 check host &amp; port</option>';
+      this.customModelTestResult.className = 'custom-model-test-result error';
+      this.customModelTestResult.textContent = `Fetch error: ${err.message}`;
+    } finally {
+      modelSelect.disabled = false;
+    }
   }
   customModelFromForm() { const data = Object.fromEntries(new FormData(this.customModelForm)); const likelyToolCapable = data.type === 'ollama' && /^(qwen3|qwen2\.5|llama3\.1|llama3\.2|mistral-nemo|mistral-small|command-r|hermes)/i.test(String(data.model || '')); const toolCapable = data.type === 'ollama' && (this._detectedToolCapable ?? likelyToolCapable); return { id: this._editingCustomModelId || `custom-${Date.now()}`, ...data, port: String(data.port).trim(), toolCapable }; }
   async saveCustomModel() { if (!this.customModelForm.reportValidity()) return; const model = this.customModelFromForm(); const i = this.customModels.findIndex((m) => m.id === model.id); if (i >= 0) this.customModels[i] = model; else this.customModels.push(model); this.customModels = await window.electronAPI.saveCustomModels(this.customModels); this.renderCustomModels(); this.closeCustomModelModal(); }
