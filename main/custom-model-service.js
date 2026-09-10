@@ -235,7 +235,7 @@ async function fetchAvailableModels(model) {
         throw new Error(`Ollama server at ${host}${port ? `:${port}` : ''} is reachable, but /api/tags failed (HTTP ${response.status}${detail ? `: ${detail}` : ''}).`);
       }
       if (response.status === 404) {
-        throw new Error(`Endpoint not found (HTTP 404) on ${url} \u2014 verify host, port, and protocol`);
+        throw new Error(`Endpoint not found (HTTP 404) on ${url} \u2014 verify host, port, and protocol (server does not expose a valid ${isOllama ? 'Ollama' : 'OpenAI'} API)`);
       }
       throw new Error(detail ? `HTTP ${response.status} ${response.statusText}${authHint}: ${detail}` : `HTTP ${response.status} ${response.statusText}${authHint}`);
     }
@@ -283,6 +283,7 @@ function matchesModelName(configured, availableList) {
   const lower = target.toLowerCase();
   if (availableList.some((m) => m.toLowerCase() === lower)) return true;
   if (!target.includes(':') && availableList.includes(`${target}:latest`)) return true;
+  if (target.endsWith(':latest') && availableList.includes(target.slice(0, -7))) return true;
   return false;
 }
 
@@ -301,9 +302,6 @@ async function verifyModelAvailable(model) {
       throw new Error(`Model '${configured}' not found on this server. Available models: (none - no models pulled on server)`);
     }
     if (!matchesModelName(configured, models)) {
-      if (model.type === 'ollama') {
-        throw new Error(`Model '${configured}' not found on this server. Available models: ${models.join(', ')}`);
-      }
       throw new Error(`Model '${configured}' not found on this server. Available models: ${models.join(', ')}`);
     }
   }

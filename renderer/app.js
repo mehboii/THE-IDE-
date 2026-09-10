@@ -1242,6 +1242,30 @@ class AppController {
       this.customModels = this.customModels.filter((m) => m.id !== this._editingCustomModelId);
       this.customModels = await window.electronAPI.saveCustomModels(this.customModels); this.renderCustomModels(); this.closeCustomModelModal();
     });
+    document.getElementById('btn-refresh-custom-models')?.addEventListener('click', () => this.fetchModelsForForm());
+    const formHost = this.customModelForm?.elements['host'];
+    const formPort = this.customModelForm?.elements['port'];
+    const formType = this.customModelForm?.elements['type'];
+    let fetchDebounceTimer = null;
+    const triggerDebouncedAutoFetch = () => {
+      clearTimeout(fetchDebounceTimer);
+      fetchDebounceTimer = setTimeout(() => {
+        if (formHost?.value?.trim() && formPort?.value?.trim()) {
+          this.fetchModelsForForm();
+        }
+      }, 400);
+    };
+    const triggerImmediateAutoFetch = () => {
+      clearTimeout(fetchDebounceTimer);
+      if (formHost?.value?.trim() && formPort?.value?.trim()) {
+        this.fetchModelsForForm();
+      }
+    };
+    formHost?.addEventListener('input', triggerDebouncedAutoFetch);
+    formPort?.addEventListener('input', triggerDebouncedAutoFetch);
+    formHost?.addEventListener('blur', triggerImmediateAutoFetch);
+    formPort?.addEventListener('blur', triggerImmediateAutoFetch);
+    formType?.addEventListener('change', triggerImmediateAutoFetch);
 
     this.btnHelp.addEventListener('click', () => this.modalHelp.classList.remove('hidden'));
     this.modalHelpClose.addEventListener('click', () => this.modalHelp.classList.add('hidden'));
