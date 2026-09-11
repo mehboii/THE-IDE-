@@ -55,7 +55,12 @@ class CustomModelPane {
   }
   receiveToken(token) {
     this._clearLoading();
-    if (this._activeMessage) { this._activeMessage.content += token; this._activeMessage.el.textContent = this._activeMessage.content; this.messagesEl.scrollTop = this.messagesEl.scrollHeight; }
+    if (!this._activeMessage) {
+      this._activeMessage = this.addMessage('assistant', '');
+    }
+    this._activeMessage.content += token;
+    this._activeMessage.el.textContent = this._activeMessage.content;
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
   receiveDone() { this._clearLoading(); this._activeMessage = null; this.input.disabled = false; this.setStatus('running'); this.input.focus(); }
   disconnect(error) {
@@ -93,11 +98,30 @@ class CustomModelPane {
   }
   showToolCall(call) {
     this._clearLoading();
+    if (this._activeMessage) {
+      const c = (this._activeMessage.content || '').trim();
+      if (!c || c.startsWith('{') || c.startsWith('```') || c.startsWith('[')) {
+        this._activeMessage.el.remove();
+        const idx = this.messages.indexOf(this._activeMessage);
+        if (idx >= 0) this.messages.splice(idx, 1);
+      }
+      this._activeMessage = null;
+    }
     const card = document.createElement('details'); card.className = 'tool-call'; card.open = true; card.innerHTML = `<summary>${this.escapeHtml(call.title || call.name)}</summary><pre>${this.escapeHtml(JSON.stringify(call.args || {}, null, 2))}</pre>`;
     if (call.needsApproval) { const actions = document.createElement('div'); actions.className = 'tool-approval'; actions.innerHTML = '<span>Approval required</span><button class="btn btn-primary" type="button">Approve</button><button class="btn btn-danger" type="button">Deny</button>'; actions.querySelector('.btn-primary').addEventListener('click', () => { window.electronAPI.decideCustomModelTool(call.callId, true); actions.remove(); }); actions.querySelector('.btn-danger').addEventListener('click', () => { window.electronAPI.decideCustomModelTool(call.callId, false); actions.remove(); }); card.appendChild(actions); }
     this.messagesEl.appendChild(card); this.toolCards.set(call.callId, card); this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
-  showToolResult({ callId, result }) { const card = this.toolCards.get(callId); if (!card) return; const resultEl = document.createElement('pre'); resultEl.className = `tool-result ${result.ok ? 'ok' : 'error'}`; resultEl.textContent = result.ok ? JSON.stringify(result, null, 2) : `Error: ${result.error || result.stderr}`; card.appendChild(resultEl); card.open = false; }
+  showToolResult({ callId, result }) {
+    const card = this.toolCards.get(callId);
+    if (!card) return;
+    const isSuccess = Boolean(result.ok || result.success);
+    const resultEl = document.createElement('pre');
+    resultEl.className = `tool-result ${isSuccess ? 'ok' : 'error'}`;
+    resultEl.textContent = isSuccess ? JSON.stringify(result, null, 2) : `Error: ${result.error || result.stderr}`;
+    card.appendChild(resultEl);
+    card.open = false;
+    this._showLoading();
+  }
   showMaxIterations(maxIterations) { this.addMessage('assistant', `Max tool-call iterations reached (${maxIterations}). Stopped to prevent an infinite loop.`); }
   addMessage(role, content) { const el = document.createElement('div'); el.className = `chat-message ${role}`; el.textContent = content; this.messagesEl.appendChild(el); const item = { role, content, el }; this.messages.push(item); this.messagesEl.scrollTop = this.messagesEl.scrollHeight; return item; }
   setStatus(status) { this.status = status; this.statusDot.className = `status-dot status-${status}`; this.statusDot.title = `Model status: ${status}`; this.onStatusChange?.(this.id, status); }

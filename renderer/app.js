@@ -935,7 +935,8 @@ class AppController {
           modelSelect.appendChild(opt);
         }
         this.customModelTestResult.className = 'custom-model-test-result error';
-        this.customModelTestResult.textContent = `Server unreachable: ${result.error}`;
+        const errStr = String(result.error || '').trim();
+        this.customModelTestResult.textContent = errStr.startsWith('Server unreachable') || errStr.startsWith('Unable to reach') ? errStr : `Server unreachable: ${errStr}`;
       }
       this._lastFetchedHost = partial.host;
       this._lastFetchedPort = partial.port;
