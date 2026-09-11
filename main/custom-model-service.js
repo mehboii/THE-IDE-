@@ -113,42 +113,149 @@ const pendingApprovals = new Map();
 const knownToolFamilies = /^(qwen3|qwen2\.5|llama3\.1|llama3\.2|mistral-nemo|mistral-small|command-r|hermes)/i;
 
 const AGENT_SYSTEM_PROMPT = 'You are an autonomous coding assistant inside an IDE. '
-  + 'You have access to tools: read_file, write_file, list_directory, and run_command. '
-  + 'When asked to create, edit, or write a file, you MUST call the write_file tool with the correct path and content arguments. '
-  + 'When asked to read a file, call read_file. When asked to list files, call list_directory. '
-  + 'When asked to run a command, call run_command. '
+  + 'You have access to tools: read_file, write_file, create_file, list_directory, and run_command. '
+  + 'When you need to create, edit, or write a file, you MUST call the write_file or create_file tool with path and content arguments. '
+  + 'When you need to read a file, call read_file. When you need to list files, call list_directory. '
+  + 'When you need to run a command, call run_command. '
   + 'Do NOT describe what you would do in prose or write code blocks instead of calling the tool. '
-  + 'Always prefer tool calls over text explanations.';
+  + 'Always prefer tool calls over text explanations when actions are required. '
+  + 'After a tool call has been executed and you receive the tool result, inspect the result. '
+  + 'If all requested work is finished, do NOT call the same tool again. Give a final, helpful response to the user summarizing what you accomplished.';
 
-// Small models (e.g. qwen2.5-coder:1.5b) often emit tool calls as JSON text
-// in content rather than using Ollama's structured tool_calls format.
-// This function detects that pattern and promotes it to a real tool call.
 function extractToolCallsFromContent(content) {
   if (!content || typeof content !== 'string') return [];
-  const trimmed = content.trim();
-  // Must start with { and look like a tool call JSON object
-  if (!trimmed.startsWith('{')) return [];
-  try {
-    const parsed = JSON.parse(trimmed);
-    const name = parsed.name || parsed.function?.name;
-    const args = parsed.arguments || parsed.function?.arguments || {};
-    if (name && typeof name === 'string' && ['read_file', 'write_file', 'list_directory', 'run_command'].includes(name)) {
-      return [{ function: { name, arguments: typeof args === 'string' ? args : JSON.stringify(args) } }];
+
+  function normalizeTool(name, rawArgs) {
+    if (!name || typeof name !== 'string') return null;
+    let toolName = name.trim();
+    if (toolName === 'create_file') toolName = 'write_file';
+    if (!['read_file', 'write_file', 'list_directory', 'run_command'].includes(toolName)) return null;
+
+    let parsedArgs = rawArgs || {};
+    if (typeof parsedArgs === 'string') {
+      try {
+        parsedArgs = JSON.parse(parsedArgs);
+      } catch {
+        parsedArgs = {};
+      }
     }
-  } catch {
-    // Content might use backticks or other non-strict-JSON; try a lenient regex extraction
-    const nameMatch = trimmed.match(/"name"\s*:\s*"(read_file|write_file|list_directory|run_command)"/);
-    if (!nameMatch) return [];
-    const argsMatch = trimmed.match(/"arguments"\s*:\s*(\{[\s\S]*\})/);
-    if (!argsMatch) return [{ function: { name: nameMatch[1], arguments: '{}' } }];
-    // Try to parse just the arguments block, cleaning common issues
-    try {
-      const cleaned = argsMatch[1].replace(/`/g, '"');
-      JSON.parse(cleaned);
-      return [{ function: { name: nameMatch[1], arguments: cleaned } }];
-    } catch { return [{ function: { name: nameMatch[1], arguments: '{}' } }]; }
+    return {
+      function: {
+        name: toolName,
+        arguments: parsedArgs
+      }
+    };
   }
-  return [];
+
+  const results = [];
+  let cleanContent = content.trim();
+  const outerFence = cleanContent.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (outerFence) cleanContent = outerFence[1].trim();
+
+  // Extract all balanced JSON objects { ... }
+  let depth = 0;
+  let startIdx = -1;
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < cleanContent.length; i++) {
+    const char = cleanContent[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === '\\') {
+      escape = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (char === '{') {
+        if (depth === 0) startIdx = i;
+        depth++;
+      } else if (char === '}') {
+        depth--;
+        if (depth === 0 && startIdx !== -1) {
+          const jsonStr = cleanContent.slice(startIdx, i + 1);
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const name = parsed.name || parsed.function?.name;
+            const args = parsed.arguments || parsed.function?.arguments || parsed.parameters || {};
+            const normalized = normalizeTool(name, args);
+            if (normalized) results.push(normalized);
+          } catch (_) {
+            try {
+              const cleaned = jsonStr.replace(/,\s*([}\]])/g, '$1');
+              const parsed = JSON.parse(cleaned);
+              const name = parsed.name || parsed.function?.name;
+              const args = parsed.arguments || parsed.function?.arguments || parsed.parameters || {};
+              const normalized = normalizeTool(name, args);
+              if (normalized) results.push(normalized);
+            } catch (_) {}
+          }
+          startIdx = -1;
+        }
+      }
+    }
+  }
+
+  if (results.length > 0) return results;
+
+  // Check for JSON array of tool calls [ { ... }, { ... } ]
+  try {
+    const parsed = JSON.parse(cleanContent);
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        const name = item.name || item.function?.name;
+        const args = item.arguments || item.function?.arguments || item.parameters || {};
+        const normalized = normalizeTool(name, args);
+        if (normalized) results.push(normalized);
+      }
+      if (results.length > 0) return results;
+    }
+  } catch (_) {}
+
+  // Function call syntax like create_file("path", "content") or create_file(path="path", content="content")
+  const funcRegex = /\b(read_file|write_file|create_file|list_directory|run_command)\s*\(([\s\S]*?)\)/g;
+  let fMatch;
+  while ((fMatch = funcRegex.exec(content)) !== null) {
+    const fnName = fMatch[1];
+    const rawArgs = fMatch[2].trim();
+    if (rawArgs.startsWith('{') && rawArgs.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(rawArgs);
+        const normalized = normalizeTool(fnName, parsed);
+        if (normalized) results.push(normalized);
+        continue;
+      } catch (_) {}
+    }
+    const argsObj = {};
+    const namedMatches = [...rawArgs.matchAll(/([a-zA-Z_]\w*)\s*=\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|`([^`\\]*(?:\\.[^`\\]*)*)`|(\{[^}]*\}))/g)];
+    if (namedMatches.length > 0) {
+      for (const nm of namedMatches) {
+        const k = nm[1];
+        const v = nm[2] ?? nm[3] ?? nm[4] ?? nm[5];
+        argsObj[k] = v;
+      }
+    } else {
+      const strMatches = [...rawArgs.matchAll(/(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|`([^`\\]*(?:\\.[^`\\]*)*)`)/g)];
+      if (fnName === 'write_file' || fnName === 'create_file') {
+        if (strMatches[0]) argsObj.path = strMatches[0][1] ?? strMatches[0][2] ?? strMatches[0][3];
+        if (strMatches[1]) argsObj.content = strMatches[1][1] ?? strMatches[1][2] ?? strMatches[1][3];
+      } else if (fnName === 'read_file' || fnName === 'list_directory') {
+        if (strMatches[0]) argsObj.path = strMatches[0][1] ?? strMatches[0][2] ?? strMatches[0][3];
+      } else if (fnName === 'run_command') {
+        if (strMatches[0]) argsObj.command = strMatches[0][1] ?? strMatches[0][2] ?? strMatches[0][3];
+      }
+    }
+    const normalized = normalizeTool(fnName, argsObj);
+    if (normalized) results.push(normalized);
+  }
+
+  return results;
 }
 
 function headers(model) {
@@ -157,7 +264,9 @@ function headers(model) {
   return value;
 }
 
-function isToolCapable(model) { return model.type === 'ollama' && model.toolCapable !== false && knownToolFamilies.test(String(model.model || '')); }
+function isToolCapable(model) {
+  return model.type === 'ollama' && model.toolCapable !== false && (model.toolCapable === true || knownToolFamilies.test(String(model.model || '')));
+}
 
 async function modelCapability(model, showData = null) {
   if (model.type !== 'ollama') return { supported: false, source: 'not-ollama' };
@@ -207,19 +316,22 @@ async function fetchAvailableModels(model) {
     if (isOllama) {
       const { base } = normalizeOllamaEndpoint(model);
       ollamaLog('base URL', { url: base });
-      ollamaLog('GET /api/tags', { endpoint: url });
+      console.log(`[OLLAMA] Request URL: ${url}`);
     }
     let response;
     try {
       response = await request(url, { headers: headers(model) });
     } catch (reqErr) {
       if (isOllama) {
+        console.log(`[OLLAMA] Request URL: ${url}`);
+        console.log(`[OLLAMA] Connection error: ${reqErr.message}`);
         const { host, port } = normalizeOllamaEndpoint(model);
         throw new Error(`Unable to reach Ollama server at ${host}${port ? `:${port}` : ''} (${reqErr.message}).`);
       }
       throw reqErr;
     }
     if (isOllama) {
+      console.log(`[OLLAMA] HTTP status: ${response.status}`);
       ollamaLog('HTTP status', { status: response.status, statusText: response.statusText });
     }
     if (!response.ok) {
@@ -240,6 +352,9 @@ async function fetchAvailableModels(model) {
       throw new Error(detail ? `HTTP ${response.status} ${response.statusText}${authHint}: ${detail}` : `HTTP ${response.status} ${response.statusText}${authHint}`);
     }
     const body = await response.json();
+    if (isOllama) {
+      console.log(`[OLLAMA] Response body: ${JSON.stringify(body)}`);
+    }
     let models = [];
     if (isOllama) {
       if (Array.isArray(body.models)) {
@@ -345,17 +460,58 @@ function requestApproval(webContents, payload) {
 function resolveApproval(callId, approved) { const resolve = pendingApprovals.get(callId); if (resolve) { pendingApprovals.delete(callId); resolve(approved); } return Boolean(resolve); }
 
 async function readOllamaResponse(response, emit) {
-  const reader = response.body.getReader(); const decoder = new TextDecoder(); let pending = ''; let content = ''; let toolCalls = [];
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  let content = '';
+  let toolCalls = [];
+
+  // Buffer early tokens to avoid streaming tool-call JSON blocks into the chat window
+  let buffer = '';
+  let streamingChecked = false;
+  let isToolStream = false;
+
+  const pushToken = (token) => {
+    if (!emit || isToolStream) return;
+    if (!streamingChecked) {
+      buffer += token;
+      const trimmed = buffer.trimStart();
+      if (trimmed.length < 10 && (trimmed.startsWith('`') || trimmed.startsWith('{') || trimmed.startsWith('['))) {
+        return;
+      }
+      if (trimmed.startsWith('```') || trimmed.startsWith('{"name"') || trimmed.startsWith('{"function"') || trimmed.startsWith('{"arguments"') || trimmed.startsWith('[{')) {
+        isToolStream = true;
+        return;
+      }
+      streamingChecked = true;
+      emit(buffer);
+      buffer = '';
+      return;
+    }
+    emit(token);
+  };
+
   while (true) {
-    const { done, value } = await reader.read(); pending += decoder.decode(value || new Uint8Array(), { stream: !done });
-    const lines = pending.split('\n'); pending = lines.pop();
+    const { done, value } = await reader.read();
+    pending += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = pending.split('\n');
+    pending = lines.pop();
     for (const line of lines) {
       if (!line.trim()) continue;
-      try { const item = JSON.parse(line); const message = item.message || {}; if (message.content) { content += message.content; emit(message.content); } if (Array.isArray(message.tool_calls)) toolCalls = toolCalls.concat(message.tool_calls); } catch (_) {}
+      try {
+        const item = JSON.parse(line);
+        const message = item.message || {};
+        if (message.content) {
+          content += message.content;
+          pushToken(message.content);
+        }
+        if (Array.isArray(message.tool_calls)) toolCalls = toolCalls.concat(message.tool_calls);
+      } catch (_) {}
     }
     if (done) break;
   }
-  // Fallback: small models may emit tool calls as JSON text in content.
+
+  // Fallback: small/quantized models may emit tool calls as JSON text in content.
   if (!toolCalls.length && content.trim()) {
     const extracted = extractToolCallsFromContent(content);
     if (extracted.length) {
@@ -363,6 +519,12 @@ async function readOllamaResponse(response, emit) {
       toolCalls = extracted;
     }
   }
+
+  // If buffered tokens were held and it turned out NOT to be a tool call, flush now
+  if (!streamingChecked && !isToolStream && buffer && emit) {
+    emit(buffer);
+  }
+
   return { content, toolCalls };
 }
 
@@ -385,15 +547,21 @@ async function streamOllamaAgent(webContents, paneId, requestId, model, messages
     const response = await request(url, { method: 'POST', headers: headers(liveModel), body: JSON.stringify(requestBody) }, CHAT_TIMEOUT_MS);
     if (!response.ok) throw await handleHttpError(response, liveModel.model);
     const answer = await readOllamaResponse(response, (token) => webContents.send('custom-model:token', { paneId, requestId, token }));
-    history.push({ role: 'assistant', content: answer.content, ...(answer.toolCalls.length ? { tool_calls: answer.toolCalls } : {}) });
-    if (!agentic || !answer.toolCalls.length) { webContents.send('custom-model:done', { paneId, requestId }); return; }
+    const hasTools = Boolean(answer.toolCalls && answer.toolCalls.length);
+    history.push({
+      role: 'assistant',
+      content: hasTools ? '' : answer.content,
+      ...(hasTools ? { tool_calls: answer.toolCalls } : {})
+    });
+    if (!agentic || !hasTools) { webContents.send('custom-model:done', { paneId, requestId }); return; }
     for (let index = 0; index < answer.toolCalls.length; index += 1) {
-      const call = parseToolCall(answer.toolCalls[index]); const callId = `${requestId}:${iteration}:${index}`;
-      const needsApproval = ['write_file', 'run_command'].includes(call.name) && !fullAutoApprove;
+      const call = parseToolCall(answer.toolCalls[index]);
+      const callId = `${requestId}:${iteration}:${index}`;
+      const needsApproval = ['write_file', 'create_file', 'run_command'].includes(call.name) && !fullAutoApprove;
       webContents.send('custom-model:tool-call', { paneId, requestId, callId, name: call.name, args: call.args, title: title(call.name, call.args), needsApproval });
       let result;
-      if (call.parseError) result = { ok: false, error: call.parseError };
-      else if (needsApproval && !(await requestApproval(webContents, { paneId, requestId, callId, name: call.name, args: call.args, title: title(call.name, call.args), needsApproval }))) result = { ok: false, error: 'User denied this tool call.' };
+      if (call.parseError) result = { success: false, ok: false, error: call.parseError };
+      else if (needsApproval && !(await requestApproval(webContents, { paneId, requestId, callId, name: call.name, args: call.args, title: title(call.name, call.args), needsApproval }))) result = { success: false, ok: false, error: 'User denied this tool call.' };
       else result = await executeTool(call.name, call.args, cwd);
       webContents.send('custom-model:tool-result', { paneId, requestId, callId, result });
       history.push({ role: 'tool', tool_name: call.name, content: JSON.stringify(result) });
